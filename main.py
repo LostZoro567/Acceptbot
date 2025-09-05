@@ -54,33 +54,24 @@ async def save_user(user_id: int):
 # -----------------------
 @bot.on_message(filters.command("start") & filters.private)
 async def start(client, message):
+    user_id = message.from_user.id
     try:
-        await message.reply(
-            "🤖 Hello! I am your Auto-Approve Bot.\n"
-            "I approve join requests automatically and send welcome DMs.\n"
-            "Admins can use /broadcast and /stats commands."
+        # Send full DM (image + text + buttons)
+        buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔥 Insta viral videos", url="https://heylink.me/Re.SauceSpace/")],
+            [InlineKeyboardButton("Free HD+ videos 💦", url="https://t.me/+LFjrsp8T7bg5ZjU1")]
+        ])
+        
+        await client.send_photo(
+            chat_id=user_id,
+            photo="https://graph.org/file/a632ff5bfea88c2e3bc4e-fc860032d437a5d866.jpg",  # local image file or valid URL
+            caption=f"👋 Hi {message.from_user.mention}!\nWelcome! Enjoy the latest videos 🎬",
+            reply_markup=buttons
         )
-        logger.info(f"/start used by {message.from_user.id}")
+        logger.info(f"Full DM sent to {user_id} after /start")
+        
     except Exception as e:
-        logger.error(f"Error in /start: {e}")
-
-# -----------------------
-# /help command
-# -----------------------
-@bot.on_message(filters.command("help") & filters.private)
-async def help_cmd(client, message):
-    try:
-        await message.reply(
-            "📖 Commands:\n"
-            "/start - Start bot\n"
-            "/help - Show help\n"
-            "Admin commands:\n"
-            "/broadcast (reply to a message) - Send to all users\n"
-            "/stats - Show bot statistics"
-        )
-        logger.info(f"/help used by {message.from_user.id}")
-    except Exception as e:
-        logger.error(f"Error in /help: {e}")
+        logger.error(f"Error sending full DM to {user_id}: {e}")
 
 # -----------------------
 # Auto-approve join requests
@@ -88,31 +79,21 @@ async def help_cmd(client, message):
 @bot.on_chat_join_request()
 async def auto_approve(client: Client, request: ChatJoinRequest):
     user = request.from_user
-    chat = request.chat
     try:
         await request.approve()
         logger.info(f"Approved join request: {user.id}")
         await save_user(user.id)
-
-        # DM welcome
-        text = f"👋 Hi {user.mention}!\nWelcome to **{chat.title}** 🎉"
-        buttons = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔥 Insta viral Videos", url="https://heylink.me/Re.SauceSpace/")],
-            [InlineKeyboardButton(" Free HD Videos 💦", url="https://t.me/+LFjrsp8T7bg5ZjU1")]
-        ])
-        await client.send_photo(
-            chat_id=user.id,
-            photo="https://graph.org/file/a632ff5bfea88c2e3bc4e-fc860032d437a5d866.jpg",
-            caption=text,
-            reply_markup=buttons
-        )
-        logger.info(f"Sent DM welcome to {user.id}")
-
+        
+        # Step 1 greeting DM
+        text = f"👋 Hey {user.mention}!\n\nClick here 👉🏻 /start"
+        await client.send_message(chat_id=user.id, text=text)
+        logger.info(f"Greeting DM sent to {user.id}")
+        
     except Exception as e:
         logger.error(f"Error approving user {user.id}: {e}")
 
 # -----------------------
-# Broadcast command
+# Broadcast command (admins only)
 # -----------------------
 @bot.on_message(filters.command("broadcast") & filters.user(ADMINS))
 async def broadcast(client, message):
@@ -130,14 +111,18 @@ async def broadcast(client, message):
             logger.warning(f"FloodWait {e.x}s for user {user['user_id']}")
             await asyncio.sleep(e.x)
         except Exception as e:
-            logger.error(f"Broadcast failed for {user['user_id']}: {e}")
             failed += 1
+            logger.error(f"Broadcast failed for {user['user_id']}: {e}")
+            # Remove unreachable users
+            if "PEER_ID_INVALID" in str(e):
+                await users_collection.delete_one({"user_id": user["user_id"]})
+                logger.info(f"Removed unreachable user {user['user_id']}")
     await stats_collection.update_one({"_id": "broadcasts"}, {"$inc": {"count": 1}}, upsert=True)
-    await message.reply(f"📢 Broadcast complete! ✅{sent} ❌{failed}")
+    await message.reply(f"📢 Broadcast complete!\n✅ Sent: {sent}\n❌ Failed: {failed}")
     logger.info(f"Broadcast finished: sent={sent}, failed={failed}")
 
 # -----------------------
-# Stats command
+# Stats command (admins only)
 # -----------------------
 @bot.on_message(filters.command("stats") & filters.user(ADMINS))
 async def stats(client, message):
