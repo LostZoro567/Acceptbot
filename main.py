@@ -5,6 +5,7 @@ from pyrogram import Client, filters
 from pyrogram.types import ChatJoinRequest, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import FloodWait
 import motor.motor_asyncio
+from aiohttp import web
 
 # =======================
 # 🔹 CONFIG from env variables
@@ -13,7 +14,8 @@ API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 MONGO_URI = os.getenv("MONGO_URI")
-ADMINS = list(map(int, os.getenv("ADMINS", "").split(",")))  # comma-separated admin IDs
+ADMINS_ENV = os.getenv("ADMINS", "")
+ADMINS = list(map(int, filter(None, ADMINS_ENV.split(","))))
 
 # =======================
 # Initialize Bot
@@ -37,7 +39,6 @@ async def save_user(user_id: int):
 async def auto_approve(client: Client, request: ChatJoinRequest):
     user = request.from_user
     chat = request.chat
-
     try:
         await request.approve()
         await save_user(user.id)
@@ -126,11 +127,23 @@ async def stats(client, message):
     )
 
 # =======================
-# Run bot with asyncio (web-service friendly)
+# Minimal HTTP server for Render
+async def handle(request):
+    return web.Response(text="Bot is running!")
+
+app_web = web.Application()
+app_web.add_routes([web.get("/", handle)])
+
+# =======================
+# Main function (async for Render)
 async def main():
+    # Run bot
     await app.start()
     print("🤖 Bot started in Web-Service Mode (Render)...")
-    await asyncio.Event().wait()  # keep running
+    # Run HTTP server in background
+    asyncio.create_task(web._run_app(app_web, host="0.0.0.0", port=int(os.environ.get("PORT", 10000))))
+    # Keep the bot alive
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
     asyncio.run(main())
