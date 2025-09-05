@@ -97,8 +97,8 @@ async def auto_approve(client: Client, request: ChatJoinRequest):
         # DM welcome
         text = f"👋 Hi {user.mention}!\nWelcome to **{chat.title}** 🎉"
         buttons = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📢 Updates Channel", url="https://t.me/YourChannel")],
-            [InlineKeyboardButton("💬 Community Group", url="https://t.me/YourGroup")]
+            [InlineKeyboardButton("🔥 Insta viral Videos", url="https://heylink.me/Re.SauceSpace/")],
+            [InlineKeyboardButton(" Free HD Videos 💦", url="https://t.me/+LFjrsp8T7bg5ZjU1")]
         ])
         await client.send_photo(
             chat_id=user.id,
