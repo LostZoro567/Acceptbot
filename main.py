@@ -34,6 +34,28 @@ async def save_user(user_id: int):
         await users_collection.insert_one({"user_id": user_id, "joined_at": datetime.datetime.utcnow()})
 
 # =======================
+# /start command
+@app.on_message(filters.command("start") & filters.private)
+async def start(client, message):
+    await message.reply(
+        "🤖 Hello! I am your Auto-Approve Bot.\n\n"
+        "I approve join requests automatically and send welcome DMs.\n"
+        "Admins can use /broadcast and /stats commands."
+    )
+
+# /help command
+@app.on_message(filters.command("help") & filters.private)
+async def help_cmd(client, message):
+    await message.reply(
+        "📖 **Commands:**\n\n"
+        "/start - Start the bot\n"
+        "/help - Show this help message\n\n"
+        "**Admin Commands:**\n"
+        "/broadcast (reply to a message) - Send message to all saved users\n"
+        "/stats - Show user & broadcast stats"
+    )
+
+# =======================
 # Auto-approve join requests
 @app.on_chat_join_request()
 async def auto_approve(client: Client, request: ChatJoinRequest):
@@ -137,7 +159,6 @@ app_web.add_routes([web.get("/", handle)])
 # =======================
 # Main function (async for Render)
 async def main():
-    # Run bot
     await app.start()
     print("🤖 Bot started in Web-Service Mode (Render)...")
     # Run HTTP server in background
