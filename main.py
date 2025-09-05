@@ -1,9 +1,11 @@
 import os
 import asyncio
+from threading import Thread
+from flask import Flask
 from pyrogram import Client, filters
-from pymongo import MongoClient
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ChatJoinRequest
 from pyrogram.errors import FloodWait
+from pymongo import MongoClient
 
 # ---------------- CONFIG ----------------
 API_ID = int(os.getenv("API_ID"))
@@ -11,6 +13,8 @@ API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 MONGO_URI = os.getenv("MONGO_URI")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
+
+PORT = int(os.getenv("PORT", 10000))  # Render assigns this
 
 GREETING_TEXT = os.getenv("GREETING_TEXT", "👋 Hello {name}, welcome!")
 GREETING_PHOTO = os.getenv("GREETING_PHOTO", None)  # File ID or URL
@@ -25,13 +29,12 @@ BATCH_SIZE = 100
 DELAY_BETWEEN_MSGS = 0.5
 
 # ---------------- INIT ----------------
-app = Client("mybot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+bot = Client("mybot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 mongo_client = MongoClient(MONGO_URI)
 db = mongo_client["telegram_bot"]
 users_collection = db["users"]
 
-
-# ---------------- HELPERS ----------------
+# ---------------- GREETING ----------------
 async def send_greeting(client, user_id, name):
     buttons = [
         [InlineKeyboardButton(BUTTON1_TEXT, url=BUTTON1_URL)],
@@ -40,23 +43,22 @@ async def send_greeting(client, user_id, name):
     try:
         if GREETING_PHOTO:
             await client.send_photo(
-                chat_id=user_id,
+                user_id,
                 photo=GREETING_PHOTO,
                 caption=GREETING_TEXT.format(name=name),
                 reply_markup=InlineKeyboardMarkup(buttons)
             )
         else:
             await client.send_message(
-                chat_id=user_id,
+                user_id,
                 text=GREETING_TEXT.format(name=name),
                 reply_markup=InlineKeyboardMarkup(buttons)
             )
     except Exception as e:
         print(f"Error sending greeting: {e}")
 
-
 # ---------------- HANDLERS ----------------
-@app.on_message(filters.command("start"))
+@bot.on_message(filters.command("start"))
 async def start_cmd(client, message):
     user_id = message.from_user.id
     name = message.from_user.first_name
@@ -66,12 +68,25 @@ async def start_cmd(client, message):
 
     await send_greeting(client, user_id, name)
 
-
-@app.on_message(filters.photo & filters.private)
+@bot.on_message(filters.photo & filters.private)
 async def get_file_id(client, message):
-    """Helper: Send an image to bot to grab its file_id."""
     await message.reply(f"File ID: `{message.photo.file_id}`")
 
+# ✅ Auto-approve join requests
+@bot.on_chat_join_request()
+async def approve_request(client, request: ChatJoinRequest):
+    user_id = request.from_user.id
+    name = request.from_user.first_name
+    try:
+        await client.approve_chat_join_request(request.chat.id, user_id)
+
+        if not users_collection.find_one({"user_id": user_id}):
+            users_collection.insert_one({"user_id": user_id})
+
+        await send_greeting(client, user_id, name)
+        print(f"✅ Approved & greeted {name} ({user_id})")
+    except Exception as e:
+        print(f"❌ Failed to approve {name}: {e}")
 
 # ---------------- BROADCAST ----------------
 async def broadcast_safe(client, reply_msg, all_users):
@@ -88,7 +103,6 @@ async def broadcast_safe(client, reply_msg, all_users):
             users_collection.delete_one({"user_id": user["user_id"]})
     return sent, failed
 
-
 async def send_batch(client, reply_msg, users):
     sent, failed = 0, 0
     for user in users:
@@ -103,20 +117,17 @@ async def send_batch(client, reply_msg, users):
             users_collection.delete_one({"user_id": user["user_id"]})
     return sent, failed
 
-
 async def broadcast_fast(client, reply_msg, all_users):
     tasks = []
     for i in range(0, len(all_users), BATCH_SIZE):
         batch = all_users[i:i + BATCH_SIZE]
         tasks.append(send_batch(client, reply_msg, batch))
-
     results = await asyncio.gather(*tasks)
     sent = sum(r[0] for r in results)
     failed = sum(r[1] for r in results)
     return sent, failed
 
-
-@app.on_message(filters.command("broadcast") & filters.reply)
+@bot.on_message(filters.command("broadcast") & filters.reply)
 async def broadcast_cmd(client, message):
     if message.from_user.id != ADMIN_ID:
         return await message.reply("❌ You are not authorized.")
@@ -129,9 +140,33 @@ async def broadcast_cmd(client, message):
     else:
         sent, failed = await broadcast_safe(client, reply_msg, all_users)
 
-    await message.reply(f"📢 Broadcast done!\n✅ Sent: {sent}\n❌ Failed: {failed}")
+    await message.reply(
+        f"📢 Broadcast completed ({BROADCAST_MODE})\n✅ Sent: {sent}\n❌ Failed: {failed}"
+    )
 
+# ---------------- STATS ----------------
+@bot.on_message(filters.command("stats"))
+async def stats_cmd(client, message):
+    if message.from_user.id != ADMIN_ID:
+        return await message.reply("❌ You are not authorized.")
+    
+    total_users = users_collection.count_documents({})
+    await message.reply(f"📊 Bot Stats:\n👥 Total users: {total_users}")
 
-# ---------------- RUN ----------------
-print("✅ Bot started successfully (Render Worker)")
-app.run()
+# ---------------- WEB SERVER ----------------
+server = Flask(__name__)
+
+@server.route("/")
+def index():
+    return "✅ Telegram bot is running on Render Web Service"
+
+def run_flask():
+    server.run(host="0.0.0.0", port=PORT)
+
+# ---------------- RUN BOTH ----------------
+def run_bot():
+    bot.run()
+
+if __name__ == "__main__":
+    Thread(target=run_flask).start()
+    run_bot()
