@@ -30,9 +30,15 @@ DELAY_BETWEEN_MSGS = 0.5
 
 # ---------------- INIT ----------------
 bot = Client("mybot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
-mongo_client = MongoClient(MONGO_URI)
-db = mongo_client["telegram_bot"]
-users_collection = db["users"]
+
+try:
+    mongo_client = MongoClient(MONGO_URI)
+    db = mongo_client["telegram_bot"]
+    users_collection = db["users"]
+    print("✅ Connected to MongoDB")
+except Exception as e:
+    print(f"❌ MongoDB connection failed: {e}")
+    users_collection = None
 
 # ---------------- GREETING ----------------
 async def send_greeting(client, user_id, name):
@@ -64,7 +70,7 @@ async def start_cmd(client, message):
     print(f"⚡ /start received from {message.from_user.id}")
     user_id = message.from_user.id
     name = message.from_user.first_name
-    if not users_collection.find_one({"user_id": user_id}):
+    if users_collection and not users_collection.find_one({"user_id": user_id}):
         users_collection.insert_one({"user_id": user_id})
     await send_greeting(client, user_id, name)
 
@@ -74,7 +80,7 @@ async def approve_request(client, request: ChatJoinRequest):
     name = request.from_user.first_name
     try:
         await client.approve_chat_join_request(request.chat.id, user_id)
-        if not users_collection.find_one({"user_id": user_id}):
+        if users_collection and not users_collection.find_one({"user_id": user_id}):
             users_collection.insert_one({"user_id": user_id})
         await send_greeting(client, user_id, name)
         print(f"✅ Approved & greeted {name} ({user_id})")
@@ -101,7 +107,7 @@ async def broadcast_cmd(client, message):
     if message.from_user.id != ADMIN_ID:
         return await message.reply("❌ You are not authorized.")
     reply_msg = message.reply_to_message
-    all_users = list(users_collection.find())
+    all_users = list(users_collection.find()) if users_collection else []
     sent, failed = await broadcast_safe(client, reply_msg, all_users)
     await message.reply(f"📢 Broadcast completed\n✅ Sent: {sent}\n❌ Failed: {failed}")
 
@@ -109,7 +115,7 @@ async def broadcast_cmd(client, message):
 async def stats_cmd(client, message):
     if message.from_user.id != ADMIN_ID:
         return await message.reply("❌ You are not authorized.")
-    total_users = users_collection.count_documents({})
+    total_users = users_collection.count_documents({}) if users_collection else 0
     await message.reply(f"📊 Bot Stats:\n👥 Total users: {total_users}")
 
 # ---------------- WEB SERVER ----------------
@@ -124,9 +130,13 @@ def run_flask():
 
 # ---------------- RUN BOTH ----------------
 async def run():
-    await bot.start()
-    print("🚀 Bot started and waiting for events...")
-    await idle()
+    try:
+        await bot.start()
+        me = await bot.get_me()
+        print(f"✅ Logged in as {me.first_name} (@{me.username})")
+        await idle()
+    except Exception as e:
+        print(f"❌ Bot failed to start: {e}")
 
 if __name__ == "__main__":
     Thread(target=run_flask).start()
