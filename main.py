@@ -161,10 +161,20 @@ app_web.add_routes([web.get("/", handle)])
 async def main():
     await app.start()
     print("🤖 Bot started in Web-Service Mode (Render)...")
-    # Run HTTP server in background
-    asyncio.create_task(web._run_app(app_web, host="0.0.0.0", port=int(os.environ.get("PORT", 10000))))
-    # Keep the bot alive
-    await asyncio.Event().wait()
+
+    # Start HTTP server properly
+    runner = web.AppRunner(app_web)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", int(os.environ.get("PORT", 10000)))
+    await site.start()
+    print(f"🌐 HTTP server running on port {os.environ.get('PORT', 10000)}")
+
+    # Keep running
+    try:
+        await asyncio.Event().wait()
+    finally:
+        await app.stop()
+        await runner.cleanup()
 
 if __name__ == "__main__":
     asyncio.run(main())
