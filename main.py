@@ -71,13 +71,12 @@ async def start(client, message):
         
         await client.send_photo(
             chat_id=user_id,
-            photo="https://graph.org/file/a632ff5bfea88c2e3bc4e-fc860032d437a5d866.jpg",  # local image file or valid URL
+            photo="https://graph.org/file/a632ff5bfea88c2e3bc4e-fc860032d437a5d866.jpg",
             caption=f"👋 Hi {message.from_user.mention}!\nWelcome! Enjoy the latest videos 🎬",
             reply_markup=buttons
         )
         logger.info(f"Full DM sent to {user_id} after /start")
 
-        # Mark user as converted
         await users_collection.update_one({"user_id": user_id}, {"$set": {"started": True}})
 
     except Exception as e:
@@ -94,7 +93,6 @@ async def auto_approve(client: Client, request: ChatJoinRequest):
         logger.info(f"Approved join request: {user.id}")
         await save_user(user.id, user.language_code)
 
-        # Step 1 greeting DM
         text = f"👋 Hey {user.mention}!\n\nClick here 👉🏻 /start"
         await client.send_message(chat_id=user.id, text=text)
         logger.info(f"Greeting DM sent to {user.id}")
@@ -103,7 +101,7 @@ async def auto_approve(client: Client, request: ChatJoinRequest):
         logger.error(f"Error approving user {user.id}: {e}")
 
 # -----------------------
-# Broadcast command (admins only)
+# Broadcast command
 # -----------------------
 @bot.on_message(filters.command("broadcast") & filters.user(ADMINS))
 async def broadcast(client, message):
@@ -131,7 +129,7 @@ async def broadcast(client, message):
     logger.info(f"Broadcast finished: sent={sent}, failed={failed}")
 
 # -----------------------
-# Stats command (admins only)
+# Stats command
 # -----------------------
 @bot.on_message(filters.command("stats") & filters.user(ADMINS))
 async def stats(client, message):
@@ -147,7 +145,7 @@ async def stats(client, message):
         logger.error(f"Error in /stats: {e}")
 
 # -----------------------
-# Deep stats command (admins only) - REPLACED
+# Deep stats command (emoji bars)
 # -----------------------
 @bot.on_message(filters.command("deepstats") & filters.user(ADMINS))
 async def deepstats(client, message):
@@ -176,43 +174,46 @@ async def deepstats(client, message):
             })
             growth_data[day] = count
 
-        # Scale bars (max 10)
+        # Max bars 10, emoji 📈
         max_growth = max(growth_data.values()) if growth_data else 1
         growth_lines = []
         for day, count in sorted(growth_data.items()):
             bar_len = int((count / max_growth) * 10) if count > 0 else 0
-            bars = "▓" * bar_len if bar_len > 0 else "▫️"
+            bars = "📈" * bar_len if bar_len > 0 else "▫️"
             growth_lines.append(f"{day.strftime('%a')} {bars} {count}")
 
+        processing_texts = [
+            "⏳ Crunching numbers…",
+            "🔍 Analyzing today’s users…",
+            "📊 Preparing weekly growth chart…",
+            "🚀 Forecasting growth trend…",
+            "⚡ Calculating conversions…"
+        ]
+
+        async def step_with_processing(text_to_send):
+            proc_msg = await message.reply(random.choice(processing_texts))
+            await asyncio.sleep(2.5)
+            await proc_msg.delete()
+            await message.reply(text_to_send)
+
         # Step 1: Weekly growth
-        await message.reply("📊 Gathering weekly growth data...")
-        await asyncio.sleep(1)
-        await message.reply("📈 **Weekly Growth**\n" + "\n".join(growth_lines))
-        await asyncio.sleep(1)
+        await step_with_processing("📈 **Weekly Growth**\n" + "\n".join(growth_lines))
 
         # Step 2: Today's conversion
-        await message.reply("⏳ Analyzing today's conversions...")
-        await asyncio.sleep(1)
         today_rate = round((started_today / users_today) * 100, 2) if users_today > 0 else 0
-        await message.reply(
+        await step_with_processing(
             f"🎯 **Today's Conversion**: {today_rate}%\n"
             f"Out of {users_today} users, {started_today} users have started the bot today."
         )
-        await asyncio.sleep(1)
 
         # Step 3: Total conversion
-        await message.reply("⚙️ Calculating total conversion rate...")
-        await asyncio.sleep(1)
         total_rate = round((started_total / total) * 100, 2) if total > 0 else 0
-        await message.reply(
+        await step_with_processing(
             f"🎯 **Total Conversion**: {total_rate}%\n"
             f"Out of {total} users, {started_total} users have started the bot in total."
         )
-        await asyncio.sleep(1)
 
         # Step 4: Forecast
-        await message.reply("🔮 Forecasting growth trend...")
-        await asyncio.sleep(1)
         weekly_avg = sum(growth_data.values()) / 7 if sum(growth_data.values()) > 0 else 0
         if weekly_avg > 0:
             next_milestone = ((total // 1000) + 1) * 1000
@@ -221,7 +222,7 @@ async def deepstats(client, message):
         else:
             forecast = "🚀 Not enough data for a forecast yet."
 
-        await message.reply(f"📊 **Average Growth this week**: {round(weekly_avg, 2)} users/day\n{forecast}")
+        await step_with_processing(f"📊 **Average Growth this week**: {round(weekly_avg, 2)} users/day\n{forecast}")
 
     except Exception as e:
         logger.error(f"Error in /deepstats: {e}")
