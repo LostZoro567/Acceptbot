@@ -47,7 +47,7 @@ async def rebuild_active_users():
                 {"$set": {"started": False, "blocked": True}}
             )
             logger.warning(f"⚠️ User {user['user_id']} blocked/unreachable: {e}")
-        await asyncio.sleep(0.5)  # Avoid hitting flood limits
+        await asyncio.sleep(0.5)
 
 # -----------------------
 # Main function
@@ -60,7 +60,8 @@ async def main():
     logger.info("Bot stopped. Rebuild complete.")
 
 # -----------------------
-# Run script
+# Run script using current loop
 # -----------------------
 if __name__ == "__main__":
-    asyncio.run(main())
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(main())
