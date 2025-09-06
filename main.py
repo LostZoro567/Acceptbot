@@ -3,6 +3,9 @@ import asyncio
 import datetime
 import logging
 import signal
+import random
+from collections import defaultdict
+
 from pyrogram import Client, filters
 from pyrogram.types import ChatJoinRequest, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import FloodWait
@@ -41,10 +44,15 @@ stats_collection = db["stats"]
 # -----------------------
 # Save user helper
 # -----------------------
-async def save_user(user_id: int):
+async def save_user(user_id: int, language=None):
     try:
         if not await users_collection.find_one({"user_id": user_id}):
-            await users_collection.insert_one({"user_id": user_id, "joined_at": datetime.datetime.utcnow()})
+            await users_collection.insert_one({
+                "user_id": user_id,
+                "joined_at": datetime.datetime.utcnow(),
+                "started": False,
+                "language": language
+            })
             logger.info(f"Saved user {user_id}")
     except Exception as e:
         logger.error(f"Error saving user {user_id}: {e}")
@@ -56,10 +64,9 @@ async def save_user(user_id: int):
 async def start(client, message):
     user_id = message.from_user.id
     try:
-        # Send full DM (image + text + buttons)
         buttons = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔥 Insta viral videos", url="https://heylink.me/Re.SauceSpace/")],
-            [InlineKeyboardButton("Free HD+ videos 💦", url="https://t.me/+LFjrsp8T7bg5ZjU1")]
+            [InlineKeyboardButton("📢 Updates Channel", url="https://heylink.me/Re.SauceSpace/")],
+            [InlineKeyboardButton("💬 Community Group", url="https://t.me/+LFjrsp8T7bg5ZjU1")]
         ])
         
         await client.send_photo(
@@ -69,7 +76,10 @@ async def start(client, message):
             reply_markup=buttons
         )
         logger.info(f"Full DM sent to {user_id} after /start")
-        
+
+        # Mark user as converted
+        await users_collection.update_one({"user_id": user_id}, {"$set": {"started": True}})
+
     except Exception as e:
         logger.error(f"Error sending full DM to {user_id}: {e}")
 
@@ -82,8 +92,8 @@ async def auto_approve(client: Client, request: ChatJoinRequest):
     try:
         await request.approve()
         logger.info(f"Approved join request: {user.id}")
-        await save_user(user.id)
-        
+        await save_user(user.id, user.language_code)
+
         # Step 1 greeting DM
         text = f"👋 Hey {user.mention}!\n\nClick here 👉🏻 /start"
         await client.send_message(chat_id=user.id, text=text)
@@ -100,8 +110,10 @@ async def broadcast(client, message):
     if not message.reply_to_message:
         await message.reply("⚠️ Reply to a message to broadcast it")
         return
+
     sent = 0
     failed = 0
+
     async for user in users_collection.find():
         try:
             await message.reply_to_message.copy(user["user_id"])
@@ -113,11 +125,8 @@ async def broadcast(client, message):
         except Exception as e:
             failed += 1
             logger.error(f"Broadcast failed for {user['user_id']}: {e}")
-            # Remove unreachable users
-            if "PEER_ID_INVALID" in str(e):
-                await users_collection.delete_one({"user_id": user["user_id"]})
-                logger.info(f"Removed unreachable user {user['user_id']}")
-    await stats_collection.update_one({"_id": "broadcasts"}, {"$inc": {"count": 1}}, upsert=True)
+
+    await stats_collection.update_one({"_id": "broadcasts"}, {"$inc": {"count": 1}, "$set": {"last": datetime.datetime.utcnow()}}, upsert=True)
     await message.reply(f"📢 Broadcast complete!\n✅ Sent: {sent}\n❌ Failed: {failed}")
     logger.info(f"Broadcast finished: sent={sent}, failed={failed}")
 
@@ -138,6 +147,66 @@ async def stats(client, message):
         logger.error(f"Error in /stats: {e}")
 
 # -----------------------
+# Deep stats command (admins only)
+# -----------------------
+@bot.on_message(filters.command("deepstats") & filters.user(ADMINS))
+async def deepstats(client, message):
+    try:
+        total = await users_collection.count_documents({})
+        started = await users_collection.count_documents({"started": True})
+        conversion_rate = round((started / total) * 100, 2) if total > 0 else 0
+
+        today = datetime.datetime.utcnow().date()
+        growth_data = defaultdict(int)
+        for i in range(7):
+            day = today - datetime.timedelta(days=i)
+            count = await users_collection.count_documents({
+                "joined_at": {
+                    "$gte": datetime.datetime.combine(day, datetime.time.min),
+                    "$lt": datetime.datetime.combine(day, datetime.time.max),
+                }
+            })
+            growth_data[day] = count
+
+        growth_lines = []
+        for day, count in sorted(growth_data.items()):
+            bars = "▓" * (count // 2) if count > 0 else "▫️"
+            growth_lines.append(f"{day.strftime('%a')} {bars} {count}")
+
+        # Fun fact
+        best_day = max(growth_data, key=growth_data.get)
+        fun_facts = [
+            f"🎉 Your best day was {best_day.strftime('%A')} with {growth_data[best_day]} new users!",
+            f"🚀 You got {growth_data[today]} users today — {'more' if growth_data[today] > growth_data.get(today - datetime.timedelta(days=1), 0) else 'less'} than yesterday.",
+            f"🔥 Average growth this week: {round(sum(growth_data.values())/7, 2)} users/day."
+        ]
+        fun_fact = random.choice(fun_facts)
+
+        # Growth forecast
+        weekly_avg = sum(growth_data.values()) / 7 if sum(growth_data.values()) > 0 else 0
+        if weekly_avg > 0:
+            next_milestone = ((total // 1000) + 1) * 1000
+            days_needed = round((next_milestone - total) / weekly_avg, 1)
+            forecast = f"📅 At this rate, you’ll hit {next_milestone} users in ~{days_needed} days."
+        else:
+            forecast = "📅 Not enough data for a forecast yet."
+
+        stats_msg = (
+            f"📊 **Deep Stats**\n\n"
+            f"👥 Total Users: {total}\n"
+            f"🎯 Conversion Rate: {conversion_rate}%\n\n"
+            f"📈 Weekly Growth:\n" + "\n".join(growth_lines) + "\n\n"
+            f"{fun_fact}\n\n"
+            f"{forecast}"
+        )
+
+        await message.reply(stats_msg)
+
+    except Exception as e:
+        logger.error(f"Error in /deepstats: {e}")
+        await message.reply("⚠️ Could not fetch deep stats.")
+
+# -----------------------
 # Minimal HTTP server for Render
 # -----------------------
 async def handle(request):
@@ -153,13 +222,11 @@ async def main():
     try:
         await bot.start()
         logger.info("Bot started")
-        # HTTP server
         runner = web.AppRunner(app_web)
         await runner.setup()
         site = web.TCPSite(runner, "0.0.0.0", PORT)
         await site.start()
         logger.info(f"HTTP server running on port {PORT}")
-        # Keep alive
         await asyncio.Event().wait()
     except Exception as e:
         logger.error(f"Fatal error in main: {e}")
