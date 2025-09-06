@@ -4,6 +4,7 @@ import datetime
 import logging
 import signal
 from collections import defaultdict
+import random
 
 from pyrogram import Client, filters
 from pyrogram.types import ChatJoinRequest, InlineKeyboardMarkup, InlineKeyboardButton
@@ -50,6 +51,7 @@ async def save_user(user_id: int, language=None):
                 "user_id": user_id,
                 "joined_at": datetime.datetime.utcnow(),
                 "started": False,
+                "blocked": False,
                 "language": language
             })
             logger.info(f"Saved user {user_id}")
@@ -76,7 +78,7 @@ async def start(client, message):
         )
         logger.info(f"Full DM sent to {user_id} after /start")
 
-        await users_collection.update_one({"user_id": user_id}, {"$set": {"started": True}})
+        await users_collection.update_one({"user_id": user_id}, {"$set": {"started": True, "blocked": False}})
 
     except Exception as e:
         logger.error(f"Error sending full DM to {user_id}: {e}")
@@ -119,32 +121,60 @@ async def broadcast(client, message):
         except FloodWait as e:
             logger.warning(f"FloodWait {e.x}s for user {user['user_id']}")
             await asyncio.sleep(e.x)
-        except Exception as e:
+        except Exception:
             failed += 1
-            logger.error(f"Broadcast failed for {user['user_id']}: {e}")
+            # mark user as blocked
+            await users_collection.update_one({"user_id": user["user_id"]}, {"$set": {"blocked": True}})
 
-    await stats_collection.update_one({"_id": "broadcasts"}, {"$inc": {"count": 1}, "$set": {"last": datetime.datetime.utcnow()}}, upsert=True)
+    await stats_collection.update_one(
+        {"_id": "broadcasts"},
+        {"$inc": {"count": 1}, "$set": {"last": datetime.datetime.utcnow()}},
+        upsert=True
+    )
     await message.reply(f"📢 Broadcast complete!\n✅ Sent: {sent}\n❌ Failed: {failed}")
     logger.info(f"Broadcast finished: sent={sent}, failed={failed}")
 
 # -----------------------
-# Stats command (admins only)
+# Stats command (admins only, updated)
 # -----------------------
 @bot.on_message(filters.command("stats") & filters.user(ADMINS))
 async def stats(client, message):
     try:
         total = await users_collection.count_documents({})
-        today = datetime.datetime.utcnow().date()
-        users_today = await users_collection.count_documents({"joined_at": {"$gte": datetime.datetime.combine(today, datetime.time.min)}})
-        broadcasts = await stats_collection.find_one({"_id": "broadcasts"})
-        total_broadcasts = broadcasts["count"] if broadcasts else 0
-        await message.reply(f"👥 Users: {total}\n📅 Today: {users_today}\n📢 Broadcasts: {total_broadcasts}")
+        active = await users_collection.count_documents({"started": True})
+        non_active = total - active
+        blocked = await users_collection.count_documents({"blocked": True})
+
+        # update latest stats in DB
+        await stats_collection.update_one(
+            {"_id": "latest_stats"},
+            {"$set": {
+                "total": total,
+                "active": active,
+                "non_active": non_active,
+                "blocked": blocked,
+                "updated_at": datetime.datetime.utcnow()
+            }},
+            upsert=True
+        )
+
+        stats_text = (
+            f"📊 **Current Bot Stats**\n\n"
+            f"👥 Total Users: {total}\n"
+            f"✅ Active Users: {active}\n"
+            f"❌ Non-Active Users: {non_active}\n"
+            f"🚫 Blocked Users: {blocked}"
+        )
+
+        await message.reply(stats_text)
         logger.info(f"/stats used by {message.from_user.id}")
+
     except Exception as e:
         logger.error(f"Error in /stats: {e}")
+        await message.reply("⚠️ Could not fetch stats.")
 
 # -----------------------
-# Deep stats command (admins only)
+# Deep stats command (admins only, updated)
 # -----------------------
 @bot.on_message(filters.command("deepstats") & filters.user(ADMINS))
 async def deepstats(client, message):
@@ -153,7 +183,7 @@ async def deepstats(client, message):
         processing_msg = await message.reply("📊 Gathering weekly growth data...")
         await asyncio.sleep(2.5)
 
-        total = await users_collection.count_documents({})
+        total_active = await users_collection.count_documents({"started": True})
         today = datetime.datetime.utcnow().date()
         growth_data = defaultdict(int)
         for i in range(7):
@@ -162,7 +192,8 @@ async def deepstats(client, message):
                 "joined_at": {
                     "$gte": datetime.datetime.combine(day, datetime.time.min),
                     "$lt": datetime.datetime.combine(day, datetime.time.max),
-                }
+                },
+                "started": True
             })
             growth_data[day] = count
 
@@ -174,21 +205,24 @@ async def deepstats(client, message):
             growth_lines.append(f"{day.strftime('%a')} {bars} {count}")
 
         await processing_msg.delete()
-        await message.reply("📊 Weekly Growth:\n\n" + "\n".join(growth_lines))
+        await message.reply("📊 Weekly Growth (Active Users):\n\n" + "\n".join(growth_lines))
 
         # Step 2: Today's Conversion
         processing_msg = await message.reply("⏳ Analyzing today's conversions...")
         await asyncio.sleep(2.5)
 
-        users_today = await users_collection.count_documents({"joined_at": {"$gte": datetime.datetime.combine(today, datetime.time.min)}})
-        started_today = await users_collection.count_documents({"joined_at": {"$gte": datetime.datetime.combine(today, datetime.time.min)}, "started": True})
-        conversion_today = round((started_today / users_today) * 100, 2) if users_today > 0 else 0
+        users_today = await users_collection.count_documents({
+            "joined_at": {"$gte": datetime.datetime.combine(today, datetime.time.min)},
+            "started": True
+        })
+        total_today = await users_collection.count_documents({"joined_at": {"$gte": datetime.datetime.combine(today, datetime.time.min)}})
+        conversion_today = round((users_today / total_today) * 100, 2) if total_today > 0 else 0
 
         await processing_msg.delete()
         await message.reply(
             "⏳ Today’s Conversion:\n\n"
-            f"👥 Users joined today: {users_today}\n"
-            f"🚀 Users who started bot: {started_today}\n"
+            f"👥 Users joined today: {total_today}\n"
+            f"🚀 Users who started bot: {users_today}\n"
             f"🎯 Conversion rate: {conversion_today}%"
         )
 
@@ -197,12 +231,12 @@ async def deepstats(client, message):
         await asyncio.sleep(2.5)
 
         started_total = await users_collection.count_documents({"started": True})
-        conversion_total = round((started_total / total) * 100, 2) if total > 0 else 0
+        conversion_total = round((started_total / total_active) * 100, 2) if total_active > 0 else 0
 
         await processing_msg.delete()
         await message.reply(
-            "⚙️ Total Conversion:\n\n"
-            f"👥 Total users: {total}\n"
+            "⚙️ Total Conversion (Active Users Only):\n\n"
+            f"👥 Total active users: {total_active}\n"
             f"🌟 Users who started the bot in total: {started_total}\n"
             f"🎯 Total Conversion rate: {conversion_total}%"
         )
@@ -213,14 +247,14 @@ async def deepstats(client, message):
 
         weekly_avg = sum(growth_data.values()) / 7 if sum(growth_data.values()) > 0 else 0
         if weekly_avg > 0:
-            next_milestone = ((total // 1000) + 1) * 1000
-            days_needed = round((next_milestone - total) / weekly_avg, 1)
-            forecast_msg = f"🔮 Forecast:\n\n🚀 At this rate, you’ll hit {next_milestone} users in ~{days_needed} days!\nKeep growing! 💪"
+            next_milestone = ((total_active // 1000) + 1) * 1000
+            days_needed = round((next_milestone - total_active) / weekly_avg, 1)
+            forecast = f"📅 At this rate, you’ll hit {next_milestone} active users in ~{days_needed} days."
         else:
-            forecast_msg = "🔮 Forecast:\n\nNot enough data for a forecast yet."
+            forecast = "📅 Not enough data for a forecast yet."
 
         await processing_msg.delete()
-        await message.reply(forecast_msg)
+        await message.reply(forecast)
 
     except Exception as e:
         logger.error(f"Error in /deepstats: {e}")
