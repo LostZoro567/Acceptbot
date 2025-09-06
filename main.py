@@ -66,13 +66,13 @@ async def start(client, message):
     user_id = message.from_user.id
     try:
         buttons = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📢 Updates Channel", url="https://t.me/YourChannel")],
-            [InlineKeyboardButton("💬 Community Group", url="https://t.me/YourGroup")]
+            [InlineKeyboardButton("📢 Updates Channel", url="https://heylink.me/Re.SauceSpace/")],
+            [InlineKeyboardButton("💬 Community Group", url="https:/https://t.me/+LFjrsp8T7bg5ZjU1")]
         ])
         
         await client.send_photo(
             chat_id=user_id,
-            photo="welcome.jpg",  # local image file or valid URL
+            photo="https://graph.org/file/a632ff5bfea88c2e3bc4e-fc860032d437a5d866.jpg",  # local image file or valid URL
             caption=f"👋 Hi {message.from_user.mention}!\nWelcome! Enjoy the latest videos 🎬",
             reply_markup=buttons
         )
