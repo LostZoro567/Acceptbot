@@ -65,13 +65,13 @@ async def start(client, message):
     user_id = message.from_user.id
     try:
         buttons = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📢 Updates Channel", url="https://heylink.me/Re.SauceSpace/")],
-            [InlineKeyboardButton("💬 Community Group", url="https://t.me/+LFjrsp8T7bg5ZjU1")]
+            [InlineKeyboardButton("📢 Updates Channel", url="https://t.me/YourChannel")],
+            [InlineKeyboardButton("💬 Community Group", url="https://t.me/YourGroup")]
         ])
         
         await client.send_photo(
             chat_id=user_id,
-            photo="https://graph.org/file/a632ff5bfea88c2e3bc4e-fc860032d437a5d866.jpg",  # local image file or valid URL
+            photo="welcome.jpg",  # local image file or valid URL
             caption=f"👋 Hi {message.from_user.mention}!\nWelcome! Enjoy the latest videos 🎬",
             reply_markup=buttons
         )
@@ -147,17 +147,25 @@ async def stats(client, message):
         logger.error(f"Error in /stats: {e}")
 
 # -----------------------
-# Deep stats command (admins only)
+# Deep stats command (admins only) - REPLACED
 # -----------------------
 @bot.on_message(filters.command("deepstats") & filters.user(ADMINS))
 async def deepstats(client, message):
     try:
         total = await users_collection.count_documents({})
-        started = await users_collection.count_documents({"started": True})
-        conversion_rate = round((started / total) * 100, 2) if total > 0 else 0
+        started_total = await users_collection.count_documents({"started": True})
 
         today = datetime.datetime.utcnow().date()
-        growth_data = defaultdict(int)
+        users_today = await users_collection.count_documents({
+            "joined_at": {"$gte": datetime.datetime.combine(today, datetime.time.min)}
+        })
+        started_today = await users_collection.count_documents({
+            "joined_at": {"$gte": datetime.datetime.combine(today, datetime.time.min)},
+            "started": True
+        })
+
+        # Weekly growth data
+        growth_data = {}
         for i in range(7):
             day = today - datetime.timedelta(days=i)
             count = await users_collection.count_documents({
@@ -168,39 +176,52 @@ async def deepstats(client, message):
             })
             growth_data[day] = count
 
+        # Scale bars (max 10)
+        max_growth = max(growth_data.values()) if growth_data else 1
         growth_lines = []
         for day, count in sorted(growth_data.items()):
-            bars = "▓" * (count // 2) if count > 0 else "▫️"
+            bar_len = int((count / max_growth) * 10) if count > 0 else 0
+            bars = "▓" * bar_len if bar_len > 0 else "▫️"
             growth_lines.append(f"{day.strftime('%a')} {bars} {count}")
 
-        # Fun fact
-        best_day = max(growth_data, key=growth_data.get)
-        fun_facts = [
-            f"🎉 Your best day was {best_day.strftime('%A')} with {growth_data[best_day]} new users!",
-            f"🚀 You got {growth_data[today]} users today — {'more' if growth_data[today] > growth_data.get(today - datetime.timedelta(days=1), 0) else 'less'} than yesterday.",
-            f"🔥 Average growth this week: {round(sum(growth_data.values())/7, 2)} users/day."
-        ]
-        fun_fact = random.choice(fun_facts)
+        # Step 1: Weekly growth
+        await message.reply("📊 Gathering weekly growth data...")
+        await asyncio.sleep(1)
+        await message.reply("📈 **Weekly Growth**\n" + "\n".join(growth_lines))
+        await asyncio.sleep(1)
 
-        # Growth forecast
+        # Step 2: Today's conversion
+        await message.reply("⏳ Analyzing today's conversions...")
+        await asyncio.sleep(1)
+        today_rate = round((started_today / users_today) * 100, 2) if users_today > 0 else 0
+        await message.reply(
+            f"🎯 **Today's Conversion**: {today_rate}%\n"
+            f"Out of {users_today} users, {started_today} users have started the bot today."
+        )
+        await asyncio.sleep(1)
+
+        # Step 3: Total conversion
+        await message.reply("⚙️ Calculating total conversion rate...")
+        await asyncio.sleep(1)
+        total_rate = round((started_total / total) * 100, 2) if total > 0 else 0
+        await message.reply(
+            f"🎯 **Total Conversion**: {total_rate}%\n"
+            f"Out of {total} users, {started_total} users have started the bot in total."
+        )
+        await asyncio.sleep(1)
+
+        # Step 4: Forecast
+        await message.reply("🔮 Forecasting growth trend...")
+        await asyncio.sleep(1)
         weekly_avg = sum(growth_data.values()) / 7 if sum(growth_data.values()) > 0 else 0
         if weekly_avg > 0:
             next_milestone = ((total // 1000) + 1) * 1000
             days_needed = round((next_milestone - total) / weekly_avg, 1)
-            forecast = f"📅 At this rate, you’ll hit {next_milestone} users in ~{days_needed} days."
+            forecast = f"🚀 At this rate, you’ll hit {next_milestone} users in ~{days_needed} days."
         else:
-            forecast = "📅 Not enough data for a forecast yet."
+            forecast = "🚀 Not enough data for a forecast yet."
 
-        stats_msg = (
-            f"📊 **Deep Stats**\n\n"
-            f"👥 Total Users: {total}\n"
-            f"🎯 Conversion Rate: {conversion_rate}%\n\n"
-            f"📈 Weekly Growth:\n" + "\n".join(growth_lines) + "\n\n"
-            f"{fun_fact}\n\n"
-            f"{forecast}"
-        )
-
-        await message.reply(stats_msg)
+        await message.reply(f"📊 **Average Growth this week**: {round(weekly_avg, 2)} users/day\n{forecast}")
 
     except Exception as e:
         logger.error(f"Error in /deepstats: {e}")
