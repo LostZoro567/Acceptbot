@@ -8,10 +8,10 @@ from aiohttp import web
 # -----------------------
 # Config from environment variables
 # -----------------------
-API_ID = int(os.getenv("24286461"))
-API_HASH = os.getenv("fe4f9e040dfefaeb8715e12d1e4da9de")
-BOT_TOKEN = os.getenv("8301270850:AAExk4uI0HWxprXwBL-Bj64C9Vber60BjL0")
-MONGO_URI = os.getenv("mongodb+srv://oneposterman_db_user:opm567opm@cluster0.47gszb3.mongodb.net/?retryWrites=true&w=majority")
+API_ID = int(os.getenv("API_ID"))
+API_HASH = os.getenv("API_HASH")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+MONGO_URI = os.getenv("MONGO_URI")
 PORT = int(os.getenv("PORT", 10000))  # Render provides the PORT
 
 # -----------------------
