@@ -149,10 +149,10 @@ async def stats(client, message):
 @bot.on_message(filters.command("deepstats") & filters.user(ADMINS))
 async def deepstats(client, message):
     try:
-        # Step 0: instant processing
-        processing_msg = await message.reply("📊 Gathering weekly growth data...")
-
         # Step 1: Weekly growth
+        processing_msg = await message.reply("📊 Gathering weekly growth data...")
+        await asyncio.sleep(2.5)
+
         total = await users_collection.count_documents({})
         today = datetime.datetime.utcnow().date()
         growth_data = defaultdict(int)
@@ -173,44 +173,44 @@ async def deepstats(client, message):
             bars = "▓" * bar_length if bar_length > 0 else "▫️"
             growth_lines.append(f"{day.strftime('%a')} {bars} {count}")
 
-        step1_msg = "📊 Weekly Growth:\n\n" + "\n".join(growth_lines)
         await processing_msg.delete()
-        await message.reply(step1_msg)
-        await asyncio.sleep(2.5)
+        await message.reply("📊 Weekly Growth:\n\n" + "\n".join(growth_lines))
 
         # Step 2: Today's Conversion
         processing_msg = await message.reply("⏳ Analyzing today's conversions...")
+        await asyncio.sleep(2.5)
+
         users_today = await users_collection.count_documents({"joined_at": {"$gte": datetime.datetime.combine(today, datetime.time.min)}})
         started_today = await users_collection.count_documents({"joined_at": {"$gte": datetime.datetime.combine(today, datetime.time.min)}, "started": True})
         conversion_today = round((started_today / users_today) * 100, 2) if users_today > 0 else 0
 
-        step2_msg = (
+        await processing_msg.delete()
+        await message.reply(
             "⏳ Today’s Conversion:\n\n"
             f"👥 Users joined today: {users_today}\n"
             f"🚀 Users who started bot: {started_today}\n"
             f"🎯 Conversion rate: {conversion_today}%"
         )
-        await processing_msg.delete()
-        await message.reply(step2_msg)
-        await asyncio.sleep(2.5)
 
         # Step 3: Total Conversion
         processing_msg = await message.reply("⚙️ Calculating total conversion rate...")
+        await asyncio.sleep(2.5)
+
         started_total = await users_collection.count_documents({"started": True})
         conversion_total = round((started_total / total) * 100, 2) if total > 0 else 0
 
-        step3_msg = (
+        await processing_msg.delete()
+        await message.reply(
             "⚙️ Total Conversion:\n\n"
             f"👥 Total users: {total}\n"
             f"🌟 Users who started the bot in total: {started_total}\n"
             f"🎯 Total Conversion rate: {conversion_total}%"
         )
-        await processing_msg.delete()
-        await message.reply(step3_msg)
-        await asyncio.sleep(2.5)
 
         # Step 4: Forecast
         processing_msg = await message.reply("🔮 Forecasting growth trend...")
+        await asyncio.sleep(2.5)
+
         weekly_avg = sum(growth_data.values()) / 7 if sum(growth_data.values()) > 0 else 0
         if weekly_avg > 0:
             next_milestone = ((total // 1000) + 1) * 1000
@@ -218,6 +218,7 @@ async def deepstats(client, message):
             forecast_msg = f"🔮 Forecast:\n\n🚀 At this rate, you’ll hit {next_milestone} users in ~{days_needed} days!\nKeep growing! 💪"
         else:
             forecast_msg = "🔮 Forecast:\n\nNot enough data for a forecast yet."
+
         await processing_msg.delete()
         await message.reply(forecast_msg)
 
