@@ -66,8 +66,8 @@ async def start(client, message):
     user_id = message.from_user.id
     try:
         buttons = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📢 Updates Channel", url="https://heylink.me/Re.SauceSpace/")],
-            [InlineKeyboardButton("💬 Community Group", url="https://t.me/+LFjrsp8T7bg5ZjU1")]
+            [InlineKeyboardButton("📢 Updates Channel", url="https://t.me/+LFjrsp8T7bg5ZjU1")],
+            [InlineKeyboardButton("💬 Community Group", url="https://heylink.me/Re.SauceSpace/")]
         ])
         
         await client.send_photo(
@@ -123,7 +123,6 @@ async def broadcast(client, message):
             await asyncio.sleep(e.x)
         except Exception:
             failed += 1
-            # mark user as blocked
             await users_collection.update_one({"user_id": user["user_id"]}, {"$set": {"blocked": True}})
 
     await stats_collection.update_one(
@@ -135,7 +134,7 @@ async def broadcast(client, message):
     logger.info(f"Broadcast finished: sent={sent}, failed={failed}")
 
 # -----------------------
-# Stats command (admins only, updated)
+# Stats command (admins only)
 # -----------------------
 @bot.on_message(filters.command("stats") & filters.user(ADMINS))
 async def stats(client, message):
@@ -145,7 +144,6 @@ async def stats(client, message):
         non_active = total - active
         blocked = await users_collection.count_documents({"blocked": True})
 
-        # update latest stats in DB
         await stats_collection.update_one(
             {"_id": "latest_stats"},
             {"$set": {
@@ -226,22 +224,7 @@ async def deepstats(client, message):
             f"🎯 Conversion rate: {conversion_today}%"
         )
 
-        # Step 3: Total Conversion
-        processing_msg = await message.reply("⚙️ Calculating total conversion rate...")
-        await asyncio.sleep(2.5)
-
-        started_total = await users_collection.count_documents({"started": True})
-        conversion_total = round((started_total / total_active) * 100, 2) if total_active > 0 else 0
-
-        await processing_msg.delete()
-        await message.reply(
-            "⚙️ Total Conversion (Active Users Only):\n\n"
-            f"👥 Total active users: {total_active}\n"
-            f"🌟 Users who started the bot in total: {started_total}\n"
-            f"🎯 Total Conversion rate: {conversion_total}%"
-        )
-
-        # Step 4: Forecast
+        # Step 3: Forecast
         processing_msg = await message.reply("🔮 Forecasting growth trend...")
         await asyncio.sleep(2.5)
 
@@ -249,7 +232,11 @@ async def deepstats(client, message):
         if weekly_avg > 0:
             next_milestone = ((total_active // 1000) + 1) * 1000
             days_needed = round((next_milestone - total_active) / weekly_avg, 1)
-            forecast = f"📅 At this rate, you’ll hit {next_milestone} active users in ~{days_needed} days."
+            forecast = (
+                "🔮 Forecast:\n\n"
+                f"🚀 At this rate, you’ll hit {next_milestone} users in ~{days_needed} days!\n"
+                "Keep growing! 💪"
+            )
         else:
             forecast = "📅 Not enough data for a forecast yet."
 
