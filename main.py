@@ -4,7 +4,6 @@ import datetime
 import logging
 import signal
 from collections import defaultdict
-import random
 
 from pyrogram import Client, filters
 from pyrogram.types import ChatJoinRequest, InlineKeyboardMarkup, InlineKeyboardButton
@@ -77,7 +76,6 @@ async def start(client, message):
         )
         logger.info(f"Full DM sent to {user_id} after /start")
 
-        # Mark user as converted
         await users_collection.update_one({"user_id": user_id}, {"$set": {"started": True}})
 
     except Exception as e:
@@ -94,7 +92,6 @@ async def auto_approve(client: Client, request: ChatJoinRequest):
         logger.info(f"Approved join request: {user.id}")
         await save_user(user.id, user.language_code)
 
-        # Step 1 greeting DM
         text = f"👋 Hey {user.mention}!\n\nClick here 👉🏻 /start"
         await client.send_message(chat_id=user.id, text=text)
         logger.info(f"Greeting DM sent to {user.id}")
@@ -152,10 +149,10 @@ async def stats(client, message):
 @bot.on_message(filters.command("deepstats") & filters.user(ADMINS))
 async def deepstats(client, message):
     try:
-        # --- Step 0: Instant processing message ---
+        # Step 0: instant processing
         processing_msg = await message.reply("📊 Gathering weekly growth data...")
-        
-        # --- Step 1: Weekly growth data ---
+
+        # Step 1: Weekly growth
         total = await users_collection.count_documents({})
         today = datetime.datetime.utcnow().date()
         growth_data = defaultdict(int)
@@ -169,9 +166,11 @@ async def deepstats(client, message):
             })
             growth_data[day] = count
 
+        max_count = max(growth_data.values()) if growth_data else 1
         growth_lines = []
         for day, count in sorted(growth_data.items()):
-            bars = "▓" * (count // 2) if count > 0 else "▫️"
+            bar_length = int((count / max_count) * 10)
+            bars = "▓" * bar_length if bar_length > 0 else "▫️"
             growth_lines.append(f"{day.strftime('%a')} {bars} {count}")
 
         step1_msg = "📊 Weekly Growth:\n\n" + "\n".join(growth_lines)
@@ -179,7 +178,7 @@ async def deepstats(client, message):
         await message.reply(step1_msg)
         await asyncio.sleep(2.5)
 
-        # --- Step 2: Today's Conversion ---
+        # Step 2: Today's Conversion
         processing_msg = await message.reply("⏳ Analyzing today's conversions...")
         users_today = await users_collection.count_documents({"joined_at": {"$gte": datetime.datetime.combine(today, datetime.time.min)}})
         started_today = await users_collection.count_documents({"joined_at": {"$gte": datetime.datetime.combine(today, datetime.time.min)}, "started": True})
@@ -195,7 +194,7 @@ async def deepstats(client, message):
         await message.reply(step2_msg)
         await asyncio.sleep(2.5)
 
-        # --- Step 3: Total Conversion ---
+        # Step 3: Total Conversion
         processing_msg = await message.reply("⚙️ Calculating total conversion rate...")
         started_total = await users_collection.count_documents({"started": True})
         conversion_total = round((started_total / total) * 100, 2) if total > 0 else 0
@@ -210,7 +209,7 @@ async def deepstats(client, message):
         await message.reply(step3_msg)
         await asyncio.sleep(2.5)
 
-        # --- Step 4: Forecast ---
+        # Step 4: Forecast
         processing_msg = await message.reply("🔮 Forecasting growth trend...")
         weekly_avg = sum(growth_data.values()) / 7 if sum(growth_data.values()) > 0 else 0
         if weekly_avg > 0:
