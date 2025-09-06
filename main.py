@@ -60,13 +60,15 @@ async def update_active_users():
 
         except (PeerIdInvalid, UserIsBlocked):
             failed += 1
-            # User blocked or invalid, no update
+            # User blocked or invalid, skip safely
         except FloodWait as e:
             print(f"⏳ FloodWait {e.x}s")
             await asyncio.sleep(e.x)
         except Exception as e:
             failed += 1
-            print(f"⚠️ Error with user {user}: {e}")
+            # safer logging: only user_id + error string
+            uid = user.get("user_id", "unknown") if isinstance(user, dict) else "invalid"
+            print(f"⚠️ Error with user {uid}: {str(e)}")
 
         checked += 1
 
