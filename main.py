@@ -60,5 +60,5 @@ async def update_active_users():
 # -----------------------
 # Run the async function
 # -----------------------
-if name == "main":
+if __name__ == "__main__":
     asyncio.run(update_active_users())
