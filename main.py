@@ -8,7 +8,7 @@ from pyrogram.errors import PeerIdInvalid, UserIsBlocked
 # -----------------------
 API_ID = int("24286461")
 API_HASH = "fe4f9e040dfefaeb8715e12d1e4da9de"
-BOT_TOKEN = "8301270850:AAExk4uI0HWxprXwBL-Bj64C9Vber60BjL0")
+BOT_TOKEN = "8301270850:AAExk4uI0HWxprXwBL-Bj64C9Vber60BjL0"
 MONGO_URI = "mongodb+srv://oneposterman_db_user:opm567opm@cluster0.47gszb3.mongodb.net/?retryWrites=true&w=majority"
 
 # -----------------------
