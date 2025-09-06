@@ -39,23 +39,34 @@ async def update_active_users():
     checked = 0
 
     async for user in users_collection.find():
-        user_id = user["user_id"]
         try:
-            # Try sending a hidden "typing" action (lightweight ping)
+            # Sanity check: skip/remove invalid records
+            if not isinstance(user, dict) or "user_id" not in user:
+                print(f"🗑️ Removing invalid record: {user}")
+                await users_collection.delete_one({"_id": user["_id"]})
+                continue
+
+            user_id = user["user_id"]
+
+            # Try lightweight "typing" action to check if bot can DM
             await bot.send_chat_action(user_id, "typing")
+
+            # Mark as active
             await users_collection.update_one(
                 {"user_id": user_id},
                 {"$set": {"started": True}}
             )
             updated_active += 1
+
         except (PeerIdInvalid, UserIsBlocked):
             failed += 1
+            # User blocked or invalid, no update
         except FloodWait as e:
             print(f"⏳ FloodWait {e.x}s")
             await asyncio.sleep(e.x)
         except Exception as e:
             failed += 1
-            print(f"⚠️ Error with user {user_id}: {e}")
+            print(f"⚠️ Error with user {user}: {e}")
 
         checked += 1
 
@@ -68,7 +79,7 @@ async def update_active_users():
 
     await bot.stop()
     print("✅ User refresh complete!")
-    print(f"👥 Total users: {total_users}")
+    print(f"👥 Total users in DB: {total_users}")
     print(f"📈 Active users: {updated_active}")
     print(f"🚫 Inactive users: {failed}")
 
