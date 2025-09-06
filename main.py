@@ -64,9 +64,14 @@ async def update_active_users():
         except FloodWait as e:
             print(f"⏳ FloodWait {e.x}s")
             await asyncio.sleep(e.x)
+        except AttributeError as e:
+            failed += 1
+            uid = user.get("user_id", "unknown") if isinstance(user, dict) else "invalid"
+            print(f"🗑️ Skipping broken user {uid}: AttributeError ({str(e)})")
+            # Permanently remove broken user from DB
+            await users_collection.delete_one({"user_id": uid})
         except Exception as e:
             failed += 1
-            # safer logging: only user_id + error string
             uid = user.get("user_id", "unknown") if isinstance(user, dict) else "invalid"
             print(f"⚠️ Error with user {uid}: {str(e)}")
 
@@ -83,7 +88,7 @@ async def update_active_users():
     print("✅ User refresh complete!")
     print(f"👥 Total users in DB: {total_users}")
     print(f"📈 Active users: {updated_active}")
-    print(f"🚫 Inactive users: {failed}")
+    print(f"🚫 Inactive/broken users: {failed}")
 
 # -----------------------
 # Minimal web server for Render
