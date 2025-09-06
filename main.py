@@ -3,12 +3,12 @@ import asyncio
 import datetime
 import logging
 import signal
-import random
 from collections import defaultdict
+import random
 
 from pyrogram import Client, filters
 from pyrogram.types import ChatJoinRequest, InlineKeyboardMarkup, InlineKeyboardButton
-from pyrogram.errors import FloodWait, PeerIdInvalid, UserIsBlocked
+from pyrogram.errors import FloodWait
 import motor.motor_asyncio
 from aiohttp import web
 
@@ -78,7 +78,6 @@ async def start(client, message):
         )
         logger.info(f"Full DM sent to {user_id} after /start")
 
-        # Mark user as converted
         await users_collection.update_one({"user_id": user_id}, {"$set": {"started": True, "blocked": False}})
 
     except Exception as e:
@@ -95,7 +94,6 @@ async def auto_approve(client: Client, request: ChatJoinRequest):
         logger.info(f"Approved join request: {user.id}")
         await save_user(user.id, user.language_code)
 
-        # Greeting DM
         text = f"👋 Hey {user.mention}!\n\nClick here 👉🏻 /start"
         await client.send_message(chat_id=user.id, text=text)
         logger.info(f"Greeting DM sent to {user.id}")
@@ -115,8 +113,7 @@ async def broadcast(client, message):
     sent = 0
     failed = 0
 
-    # Only active users
-    async for user in users_collection.find({"started": True, "blocked": False}):
+    async for user in users_collection.find():
         try:
             await message.reply_to_message.copy(user["user_id"])
             sent += 1
@@ -124,12 +121,8 @@ async def broadcast(client, message):
         except FloodWait as e:
             logger.warning(f"FloodWait {e.x}s for user {user['user_id']}")
             await asyncio.sleep(e.x)
-        except (PeerIdInvalid, UserIsBlocked):
+        except Exception:
             failed += 1
-            await users_collection.update_one({"user_id": user["user_id"]}, {"$set": {"blocked": True}})
-        except Exception as e:
-            failed += 1
-            logger.error(f"Broadcast failed for {user['user_id']}: {e}")
             await users_collection.update_one({"user_id": user["user_id"]}, {"$set": {"blocked": True}})
 
     await stats_collection.update_one(
@@ -137,7 +130,7 @@ async def broadcast(client, message):
         {"$inc": {"count": 1}, "$set": {"last": datetime.datetime.utcnow()}},
         upsert=True
     )
-    await message.reply(f"📢 Broadcast complete!\n✅ Sent: {sent}\n❌ Failed: {failed}\n🎯 Targeted Active Users Only!")
+    await message.reply(f"📢 Broadcast complete!\n✅ Sent: {sent}\n❌ Failed: {failed}")
     logger.info(f"Broadcast finished: sent={sent}, failed={failed}")
 
 # -----------------------
@@ -147,64 +140,112 @@ async def broadcast(client, message):
 async def stats(client, message):
     try:
         total = await users_collection.count_documents({})
-        active = await users_collection.count_documents({"started": True, "blocked": False})
-        inactive = await users_collection.count_documents({"started": False})
+        active = await users_collection.count_documents({"started": True})
+        non_active = total - active
         blocked = await users_collection.count_documents({"blocked": True})
 
-        broadcasts = await stats_collection.find_one({"_id": "broadcasts"})
-        total_broadcasts = broadcasts["count"] if broadcasts else 0
+        await stats_collection.update_one(
+            {"_id": "latest_stats"},
+            {"$set": {
+                "total": total,
+                "active": active,
+                "non_active": non_active,
+                "blocked": blocked,
+                "updated_at": datetime.datetime.utcnow()
+            }},
+            upsert=True
+        )
 
-        await message.reply(
-            f"📊 **Stats Overview**\n\n"
+        stats_text = (
+            f"📊 **Current Bot Stats**\n\n"
             f"👥 Total Users: {total}\n"
             f"✅ Active Users: {active}\n"
-            f"🕓 Inactive Users: {inactive}\n"
-            f"⛔ Blocked Users: {blocked}\n\n"
-            f"📢 Broadcasts Sent: {total_broadcasts}"
+            f"❌ Non-Active Users: {non_active}\n"
+            f"🚫 Blocked Users: {blocked}"
         )
+
+        await message.reply(stats_text)
         logger.info(f"/stats used by {message.from_user.id}")
+
     except Exception as e:
         logger.error(f"Error in /stats: {e}")
+        await message.reply("⚠️ Could not fetch stats.")
 
 # -----------------------
-# Refresh DB command (admins only)
+# Deep stats command (admins only, updated)
 # -----------------------
-@bot.on_message(filters.command("refreshdb") & filters.user(ADMINS))
-async def refreshdb(client, message):
-    await message.reply("🔄 Refreshing database... This may take a while.")
+@bot.on_message(filters.command("deepstats") & filters.user(ADMINS))
+async def deepstats(client, message):
+    try:
+        # Step 1: Weekly growth
+        processing_msg = await message.reply("📊 Gathering weekly growth data...")
+        await asyncio.sleep(2.5)
 
-    total = 0
-    active = 0
-    failed = 0
+        total_active = await users_collection.count_documents({"started": True})
+        today = datetime.datetime.utcnow().date()
+        growth_data = defaultdict(int)
+        for i in range(7):
+            day = today - datetime.timedelta(days=i)
+            count = await users_collection.count_documents({
+                "joined_at": {
+                    "$gte": datetime.datetime.combine(day, datetime.time.min),
+                    "$lt": datetime.datetime.combine(day, datetime.time.max),
+                },
+                "started": True
+            })
+            growth_data[day] = count
 
-    async for user in users_collection.find({}):
-        total += 1
-        try:
-            await client.send_chat_action(user["user_id"], "typing")
-            await users_collection.update_one(
-                {"user_id": user["user_id"]}, {"$set": {"blocked": False, "started": True}}
-            )
-            active += 1
-        except (PeerIdInvalid, UserIsBlocked):
-            failed += 1
-            await users_collection.update_one(
-                {"user_id": user["user_id"]}, {"$set": {"blocked": True}}
-            )
-        except Exception as e:
-            failed += 1
-            uid = user.get("user_id", "unknown")
-            logger.error(f"⚠️ Error with user {uid}: {str(e)}")
-            await users_collection.update_one(
-                {"user_id": uid}, {"$set": {"blocked": True}}
-            )
+        max_count = max(growth_data.values()) if growth_data else 1
+        growth_lines = []
+        for day, count in sorted(growth_data.items()):
+            bar_length = int((count / max_count) * 10)
+            bars = "▓" * bar_length if bar_length > 0 else "▫️"
+            growth_lines.append(f"{day.strftime('%a')} {bars} {count}")
 
-    await message.reply(
-        f"✅ Refresh Complete!\n\n"
-        f"👥 Checked: {total}\n"
-        f"✅ Active: {active}\n"
-        f"⛔ Blocked/Failed: {failed}"
-    )
-    logger.info(f"/refreshdb finished: total={total}, active={active}, failed={failed}")
+        await processing_msg.delete()
+        await message.reply("📊 Weekly Growth (Active Users):\n\n" + "\n".join(growth_lines))
+
+        # Step 2: Today's Conversion
+        processing_msg = await message.reply("⏳ Analyzing today's conversions...")
+        await asyncio.sleep(2.5)
+
+        users_today = await users_collection.count_documents({
+            "joined_at": {"$gte": datetime.datetime.combine(today, datetime.time.min)},
+            "started": True
+        })
+        total_today = await users_collection.count_documents({"joined_at": {"$gte": datetime.datetime.combine(today, datetime.time.min)}})
+        conversion_today = round((users_today / total_today) * 100, 2) if total_today > 0 else 0
+
+        await processing_msg.delete()
+        await message.reply(
+            "⏳ Today’s Conversion:\n\n"
+            f"👥 Users joined today: {total_today}\n"
+            f"🚀 Users who started bot: {users_today}\n"
+            f"🎯 Conversion rate: {conversion_today}%"
+        )
+
+        # Step 3: Forecast
+        processing_msg = await message.reply("🔮 Forecasting growth trend...")
+        await asyncio.sleep(2.5)
+
+        weekly_avg = sum(growth_data.values()) / 7 if sum(growth_data.values()) > 0 else 0
+        if weekly_avg > 0:
+            next_milestone = ((total_active // 1000) + 1) * 1000
+            days_needed = round((next_milestone - total_active) / weekly_avg, 1)
+            forecast = (
+                "🔮 Forecast:\n\n"
+                f"🚀 At this rate, you’ll hit {next_milestone} users in ~{days_needed} days!\n"
+                "Keep growing! 💪"
+            )
+        else:
+            forecast = "📅 Not enough data for a forecast yet."
+
+        await processing_msg.delete()
+        await message.reply(forecast)
+
+    except Exception as e:
+        logger.error(f"Error in /deepstats: {e}")
+        await message.reply("⚠️ Could not fetch deep stats.")
 
 # -----------------------
 # Minimal HTTP server for Render
