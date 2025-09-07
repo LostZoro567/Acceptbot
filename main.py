@@ -4,7 +4,6 @@ import datetime
 import logging
 import signal
 from collections import defaultdict
-import random
 
 from pyrogram import Client, filters
 from pyrogram.types import ChatJoinRequest, InlineKeyboardMarkup, InlineKeyboardButton
@@ -31,6 +30,7 @@ MONGO_URI = os.getenv("MONGO_URI")
 ADMINS_ENV = os.getenv("ADMINS", "")
 ADMINS = list(map(int, filter(None, ADMINS_ENV.split(","))))
 PORT = int(os.getenv("PORT", 10000))
+BOT_USERNAME = os.getenv("BOT_USERNAME", "YourBotUsername")
 
 # -----------------------
 # Initialize bot and Mongo
@@ -61,38 +61,32 @@ async def save_user(user_id: int, language=None):
 # -----------------------
 # /start command
 # -----------------------
-@bot.on_message(filters.command("start") & filters.private)
+@bot.on_message(filters.private & filters.command("start"))
 async def start(client, message):
     user_id = message.from_user.id
     payload = message.text.split(maxsplit=1)[1] if len(message.text.split()) > 1 else None
 
-    # Save user as active
-    await users_collection.update_one(
-        {"user_id": user_id},
-        {"$set": {"started": True, "blocked": False, "payload": payload}},
-        upsert=True
-    )
-
-    # Send your welcome media + buttons
-    buttons = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📢 Updates Channel", url="https://t.me/YourChannel")],
-        [InlineKeyboardButton("💬 Community Group", url="https://t.me/YourGroup")]
-    ])
-
-    await client.send_photo(
-        chat_id=user_id,
-        photo="https://graph.org/file/a632ff5bfea88c2e3bc4e-fc860032d437a5d866.jpg",
-        reply_markup=buttons
-    )
-
-        logger.info(f"Full DM sent to {user_id} after /start")
-
-        # Mark as started and unblock
+    try:
+        # Mark user as started
         await users_collection.update_one(
             {"user_id": user_id},
-            {"$set": {"started": True, "blocked": False}},
+            {"$set": {"started": True, "blocked": False, "payload": payload}},
             upsert=True
         )
+
+        # Send welcome photo + buttons
+        buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📢 Updates Channel", url="https://t.me/+LFjrsp8T7bg5ZjU1")],
+            [InlineKeyboardButton("💬 Community Group", url="https://heylink.me/Re.SauceSpace/")]
+        ])
+
+        await client.send_photo(
+            chat_id=user_id,
+            photo="https://graph.org/file/a632ff5bfea88c2e3bc4e-fc860032d437a5d866.jpg",
+            reply_markup=buttons
+        )
+
+        logger.info(f"Full DM sent to {user_id} after pressing start")
 
     except Exception as e:
         logger.error(f"Error sending full DM to {user_id}: {e}")
@@ -101,32 +95,29 @@ async def start(client, message):
 # Auto-approve join requests
 # -----------------------
 @bot.on_chat_join_request()
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+async def on_join_request(client, chat_join_request: ChatJoinRequest):
+    try:
+        # Approve the join request
+        await chat_join_request.approve()
+        user = chat_join_request.from_user
 
-BOT_USERNAME = "YourBotUsername"  # Replace with your bot's username
+        # Send Start Bot button in DM (will fail silently if user hasn't started)
+        buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton("▶ Start Bot", url=f"https://t.me/Jennyrerobot?start=auto_approved")]
+        ])
 
-buttons = InlineKeyboardMarkup([
-    [InlineKeyboardButton("▶ Start Bot", url=f"https://t.me/Jennyrerobot?start=auto_approved")]
-])
-
-await client.send_photo(
-    chat_id=user.id,
-    photo="https://graph.org/file/5c159e3cb5694e24aefe2-34301124b07248c91f.jpg",  # your auto-approve media
-    reply_markup=buttons
-)
-
-        logger.info(f"Greeting DM sent to {user.id}")
+        try:
+            await client.send_photo(
+                chat_id=user.id,
+                photo="https://graph.org/file/5c159e3cb5694e24aefe2-34301124b07248c91f.jpg",
+                reply_markup=buttons
+            )
+            logger.info(f"Start button sent to user {user.id}")
+        except Exception:
+            logger.warning(f"Cannot DM user {user.id} yet; they must press Start manually.")
 
     except Exception as e:
         logger.error(f"Error approving user {user.id}: {e}")
-
-# -----------------------
-# Callback for start button
-# -----------------------
-@bot.on_callback_query(filters.regex("start_bot"))
-async def start_button_callback(client, callback_query):
-    await callback_query.answer()
-    await start(client, callback_query.message)
 
 # -----------------------
 # Broadcast command (admins only)
@@ -162,6 +153,23 @@ async def broadcast(client, message):
     )
     await message.reply(f"📢 Broadcast complete!\n✅ Sent: {sent}\n❌ Failed: {failed}")
     logger.info(f"Broadcast finished: sent={sent}, failed={failed}")
+
+# -----------------------
+# Refresh command (admins only)
+# -----------------------
+@bot.on_message(filters.command("refresh") & filters.user(ADMINS))
+async def refresh(client, message):
+    sent = 0
+    failed = 0
+    async for user in users_collection.find():
+        try:
+            await client.send_message(user["user_id"], "🌀 Refreshing your status...")
+            await users_collection.update_one({"user_id": user["user_id"]}, {"$set": {"started": True}})
+            sent += 1
+        except Exception:
+            await users_collection.update_one({"user_id": user["user_id"]}, {"$set": {"blocked": True}})
+            failed += 1
+    await message.reply(f"🔄 Refresh complete!\n✅ Active: {sent}\n❌ Blocked: {failed}")
 
 # -----------------------
 # Stats command (admins only)
@@ -202,100 +210,6 @@ async def stats(client, message):
         await message.reply("⚠️ Could not fetch stats.")
 
 # -----------------------
-# Deep stats command (admins only)
-# -----------------------
-@bot.on_message(filters.command("deepstats") & filters.user(ADMINS))
-async def deepstats(client, message):
-    try:
-        # Step 1: Weekly growth
-        processing_msg = await message.reply("📊 Gathering weekly growth data...")
-        await asyncio.sleep(2.5)
-
-        total_active = await users_collection.count_documents({"started": True})
-        today = datetime.datetime.utcnow().date()
-        growth_data = defaultdict(int)
-        for i in range(7):
-            day = today - datetime.timedelta(days=i)
-            count = await users_collection.count_documents({
-                "joined_at": {"$gte": datetime.datetime.combine(day, datetime.time.min),
-                              "$lt": datetime.datetime.combine(day, datetime.time.max)},
-                "started": True
-            })
-            growth_data[day] = count
-
-        max_count = max(growth_data.values()) if growth_data else 1
-        growth_lines = []
-        for day, count in sorted(growth_data.items()):
-            bar_length = int((count / max_count) * 10)
-            bars = "▓" * bar_length if bar_length > 0 else "▫️"
-            growth_lines.append(f"{day.strftime('%a')} {bars} {count}")
-
-        await processing_msg.delete()
-        await message.reply("📊 Weekly Growth (Active Users):\n\n" + "\n".join(growth_lines))
-
-        # Step 2: Today's Conversion
-        processing_msg = await message.reply("⏳ Analyzing today's conversions...")
-        await asyncio.sleep(2.5)
-
-        users_today = await users_collection.count_documents({
-            "joined_at": {"$gte": datetime.datetime.combine(today, datetime.time.min)},
-            "started": True
-        })
-        total_today = await users_collection.count_documents({
-            "joined_at": {"$gte": datetime.datetime.combine(today, datetime.time.min)}
-        })
-        conversion_today = round((users_today / total_today) * 100, 2) if total_today > 0 else 0
-
-        await processing_msg.delete()
-        await message.reply(
-            "⏳ Today’s Conversion:\n\n"
-            f"👥 Users joined today: {total_today}\n"
-            f"🚀 Users who started bot: {users_today}\n"
-            f"🎯 Conversion rate: {conversion_today}%"
-        )
-
-        # Step 3: Forecast
-        processing_msg = await message.reply("🔮 Forecasting growth trend...")
-        await asyncio.sleep(2.5)
-
-        weekly_avg = sum(growth_data.values()) / 7 if sum(growth_data.values()) > 0 else 0
-        if weekly_avg > 0:
-            next_milestone = ((total_active // 1000) + 1) * 1000
-            days_needed = round((next_milestone - total_active) / weekly_avg, 1)
-            forecast = (
-                "🔮 Forecast:\n\n"
-                f"🚀 At this rate, you’ll hit {next_milestone} users in ~{days_needed} days!\n"
-                "Keep growing! 💪"
-            )
-        else:
-            forecast = "📅 Not enough data for a forecast yet."
-
-        await processing_msg.delete()
-        await message.reply(forecast)
-
-    except Exception as e:
-        logger.error(f"Error in /deepstats: {e}")
-        await message.reply("⚠️ Could not fetch deep stats.")
-
-# -----------------------
-# Refresh command (admins only)
-# -----------------------
-@bot.on_message(filters.command("refresh") & filters.user(ADMINS))
-async def refresh(client, message):
-    sent = 0
-    failed = 0
-    async for user in users_collection.find():
-        try:
-            # Try DM to see if user is active
-            await client.send_message(user["user_id"], "🌀 Refreshing your status...")
-            await users_collection.update_one({"user_id": user["user_id"]}, {"$set": {"started": True}})
-            sent += 1
-        except Exception:
-            await users_collection.update_one({"user_id": user["user_id"]}, {"$set": {"blocked": True}})
-            failed += 1
-    await message.reply(f"🔄 Refresh complete!\n✅ Active: {sent}\n❌ Blocked: {failed}")
-
-# -----------------------
 # Minimal HTTP server for Render
 # -----------------------
 async def handle(request):
@@ -308,21 +222,16 @@ app_web.add_routes([web.get("/", handle)])
 # Main async function
 # -----------------------
 async def main():
-    try:
-        await bot.start()
-        logger.info("Bot started")
-        runner = web.AppRunner(app_web)
-        await runner.setup()
-        site = web.TCPSite(runner, "0.0.0.0", PORT)
-        await site.start()
-        logger.info(f"HTTP server running on port {PORT}")
-        await asyncio.Event().wait()
-    except Exception as e:
-        logger.error(f"Fatal error in main: {e}")
-    finally:
-        await bot.stop()
-        await runner.cleanup()
-        logger.info("Bot stopped cleanly")
+    await bot.start()
+    logger.info("Bot started")
+
+    runner = web.AppRunner(app_web)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", PORT)
+    await site.start()
+    logger.info(f"HTTP server running on port {PORT}")
+
+    await asyncio.Event().wait()  # Keep running
 
 # -----------------------
 # Run loop safely
