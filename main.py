@@ -1,4 +1,4 @@
-import os 
+import os
 import asyncio
 import datetime
 import logging
@@ -73,45 +73,14 @@ async def start(client, message):
         await client.send_photo(
             chat_id=user_id,
             photo="https://graph.org/file/a632ff5bfea88c2e3bc4e-fc860032d437a5d866.jpg",
-            caption=f"👋 Hi {message.from_user.mention}!\nWelcome! Enjoy the latest videos 🎬",
             reply_markup=buttons
         )
         logger.info(f"Full DM sent to {user_id} after /start")
 
-        await users_collection.update_one(
-            {"user_id": user_id},
-            {"$set": {"started": True, "blocked": False}},
-            upsert=True
-        )
+        await users_collection.update_one({"user_id": user_id}, {"$set": {"started": True, "blocked": False}}, upsert=True)
 
     except Exception as e:
         logger.error(f"Error sending full DM to {user_id}: {e}")
-
-# -----------------------
-# Handle "🚀 Start Bot" button
-# -----------------------
-@bot.on_callback_query(filters.regex("start_bot"))
-async def handle_start_button(client, callback_query):
-    user_id = callback_query.from_user.id
-    try:
-        # Acknowledge button click
-        await callback_query.answer("🚀 Starting bot...")
-
-        # Call the /start logic (send media + buttons)
-        fake_message = callback_query.message
-        fake_message.from_user = callback_query.from_user
-        await start(client, fake_message)
-
-        # Mark user as active
-        await users_collection.update_one(
-            {"user_id": user_id},
-            {"$set": {"started": True, "blocked": False}},
-            upsert=True
-        )
-        logger.info(f"User {user_id} activated via button")
-
-    except Exception as e:
-        logger.error(f"Error handling start button for {user_id}: {e}")
 
 # -----------------------
 # Auto-approve join requests
@@ -124,7 +93,6 @@ async def auto_approve(client: Client, request: ChatJoinRequest):
         logger.info(f"Approved join request: {user.id}")
         await save_user(user.id, user.language_code)
 
-        # Send greeting with button to start bot
         buttons = InlineKeyboardMarkup([
             [InlineKeyboardButton("Watch HD+ Videos 💦", callback_data="start_bot")]
         ])
@@ -139,6 +107,17 @@ async def auto_approve(client: Client, request: ChatJoinRequest):
         logger.error(f"Error approving user {user.id}: {e}")
 
 # -----------------------
+# Callback for start button
+# -----------------------
+@bot.on_callback_query(filters.regex("start_bot"))
+async def callback_start_bot(client, callback_query):
+    try:
+        await callback_query.answer()
+        await start(client, callback_query.message)
+    except Exception as e:
+        logger.error(f"Error handling start button: {e}")
+
+# -----------------------
 # Broadcast command (admins only)
 # -----------------------
 @bot.on_message(filters.command("broadcast") & filters.user(ADMINS))
@@ -150,7 +129,7 @@ async def broadcast(client, message):
     sent = 0
     failed = 0
 
-    async for user in users_collection.find({"started": True}):  # ✅ Only active users
+    async for user in users_collection.find({"started": True}):
         try:
             await message.reply_to_message.copy(user["user_id"])
             sent += 1
@@ -160,10 +139,7 @@ async def broadcast(client, message):
             await asyncio.sleep(e.x)
         except Exception:
             failed += 1
-            await users_collection.update_one(
-                {"user_id": user["user_id"]},
-                {"$set": {"blocked": True}}
-            )
+            await users_collection.update_one({"user_id": user["user_id"]}, {"$set": {"blocked": True}})
 
     await stats_collection.update_one(
         {"_id": "broadcasts"},
@@ -210,6 +186,111 @@ async def stats(client, message):
     except Exception as e:
         logger.error(f"Error in /stats: {e}")
         await message.reply("⚠️ Could not fetch stats.")
+
+# -----------------------
+# Deep stats command (admins only)
+# -----------------------
+@bot.on_message(filters.command("deepstats") & filters.user(ADMINS))
+async def deepstats(client, message):
+    try:
+        # Step 1: Weekly growth
+        processing_msg = await message.reply("📊 Gathering weekly growth data...")
+        await asyncio.sleep(2.5)
+
+        total_active = await users_collection.count_documents({"started": True})
+        today = datetime.datetime.utcnow().date()
+        growth_data = defaultdict(int)
+        for i in range(7):
+            day = today - datetime.timedelta(days=i)
+            count = await users_collection.count_documents({
+                "joined_at": {
+                    "$gte": datetime.datetime.combine(day, datetime.time.min),
+                    "$lt": datetime.datetime.combine(day, datetime.time.max),
+                },
+                "started": True
+            })
+            growth_data[day] = count
+
+        max_count = max(growth_data.values()) if growth_data else 1
+        growth_lines = []
+        for day, count in sorted(growth_data.items()):
+            bar_length = int((count / max_count) * 10)
+            bars = "▓" * bar_length if bar_length > 0 else "▫️"
+            growth_lines.append(f"{day.strftime('%a')} {bars} {count}")
+
+        await processing_msg.delete()
+        await message.reply("📊 Weekly Growth (Active Users):\n\n" + "\n".join(growth_lines))
+
+        # Step 2: Today's Conversion
+        processing_msg = await message.reply("⏳ Analyzing today's conversions...")
+        await asyncio.sleep(2.5)
+
+        users_today = await users_collection.count_documents({
+            "joined_at": {"$gte": datetime.datetime.combine(today, datetime.time.min)},
+            "started": True
+        })
+        total_today = await users_collection.count_documents({"joined_at": {"$gte": datetime.datetime.combine(today, datetime.time.min)}})
+        conversion_today = round((users_today / total_today) * 100, 2) if total_today > 0 else 0
+
+        await processing_msg.delete()
+        await message.reply(
+            "⏳ Today’s Conversion:\n\n"
+            f"👥 Users joined today: {total_today}\n"
+            f"🚀 Users who started bot: {users_today}\n"
+            f"🎯 Conversion rate: {conversion_today}%"
+        )
+
+        # Step 3: Forecast
+        processing_msg = await message.reply("🔮 Forecasting growth trend...")
+        await asyncio.sleep(2.5)
+
+        weekly_avg = sum(growth_data.values()) / 7 if sum(growth_data.values()) > 0 else 0
+        if weekly_avg > 0:
+            next_milestone = ((total_active // 1000) + 1) * 1000
+            days_needed = round((next_milestone - total_active) / weekly_avg, 1)
+            forecast = (
+                "🔮 Forecast:\n\n"
+                f"🚀 At this rate, you’ll hit {next_milestone} users in ~{days_needed} days!\n"
+                "Keep growing! 💪"
+            )
+        else:
+            forecast = "📅 Not enough data for a forecast yet."
+
+        await processing_msg.delete()
+        await message.reply(forecast)
+
+    except Exception as e:
+        logger.error(f"Error in /deepstats: {e}")
+        await message.reply("⚠️ Could not fetch deep stats.")
+
+# -----------------------
+# Refresh active users (admins only)
+# -----------------------
+@bot.on_message(filters.command("refresh") & filters.user(ADMINS))
+async def refresh(client, message):
+    try:
+        msg = await message.reply("🔄 Refreshing active users...")
+        sent = 0
+        blocked = 0
+
+        async for user in users_collection.find({}):
+            user_id = user["user_id"]
+            try:
+                await client.send_message(user_id, "👋 Checking if you are active...")
+                await users_collection.update_one(
+                    {"user_id": user_id}, {"$set": {"started": True, "blocked": False}}, upsert=True
+                )
+                sent += 1
+                await asyncio.sleep(0.5)
+            except Exception:
+                blocked += 1
+                await users_collection.update_one({"user_id": user_id}, {"$set": {"started": False, "blocked": True}})
+
+        await msg.edit(f"✅ Refresh complete!\nActive users: {sent}\nBlocked users: {blocked}")
+
+    except Exception as e:
+        logger.error(f"Error in /refresh: {e}")
+        await message.reply("⚠️ Refresh failed.")
 
 # -----------------------
 # Minimal HTTP server for Render
