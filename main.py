@@ -104,7 +104,7 @@ async def on_join_request(client, chat_join_request: ChatJoinRequest):
 
         # Send Start Bot button in DM (will only save when user actually presses it)
         buttons = InlineKeyboardMarkup([
-            [InlineKeyboardButton("▶ Start Bot", url=f"https://t.me/Jennyrerobot?start=auto_approved")]
+            [InlineKeyboardButton("▶ Start Bot", url=f"https://t.me/{BOT_USERNAME}?start=auto_approved")]
         ])
 
         try:
@@ -115,10 +115,10 @@ async def on_join_request(client, chat_join_request: ChatJoinRequest):
             )
             logger.info(f"Start button sent to user {user.id}")
         except Exception:
-            logger.warning(f"Cannot DM user {user.id} yet; they must press Start manually.")
+            logger.warning(f"Cannot DM user {chat_join_request.from_user.id} yet; they must press Start manually.")
 
     except Exception as e:
-        logger.error(f"Error approving user {user.id}: {e}")
+        logger.error(f"Error approving join request: {e}")
 
 # -----------------------
 # Broadcast command (admins only)
