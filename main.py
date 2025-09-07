@@ -101,7 +101,7 @@ async def on_join_request(client, chat_join_request: ChatJoinRequest):
         await chat_join_request.approve()
         user = chat_join_request.from_user
 
-        # Send Start Bot button in DM (will fail silently if user hasn't started)
+        # Send Start Bot button in DM
         buttons = InlineKeyboardMarkup([
             [InlineKeyboardButton("▶ Start Bot", url=f"https://t.me/Jennyrerobot?start=auto_approved")]
         ])
@@ -170,7 +170,6 @@ async def refresh(client, message):
             await users_collection.update_one({"user_id": user["user_id"]}, {"$set": {"blocked": True}})
             failed += 1
     await message.reply(f"🔄 Refresh complete!\n✅ Active: {sent}\n❌ Blocked: {failed}")
-
 # -----------------------
 # Stats command (admins only)
 # -----------------------
@@ -208,6 +207,85 @@ async def stats(client, message):
     except Exception as e:
         logger.error(f"Error in /stats: {e}")
         await message.reply("⚠️ Could not fetch stats.")
+
+# -----------------------
+# Deep stats command (admins only)
+# -----------------------
+@bot.on_message(filters.command("deepstats") & filters.user(ADMINS))
+async def deepstats(client, message):
+    try:
+        today = datetime.datetime.utcnow().date()
+
+        # --- Step 1: Weekly Growth ---
+        processing_msg = await message.reply("📊 Gathering weekly growth data...")
+        await asyncio.sleep(2.5)
+
+        total_active = await users_collection.count_documents({"started": True})
+        growth_data = defaultdict(int)
+        for i in range(7):
+            day = today - datetime.timedelta(days=i)
+            count = await users_collection.count_documents({
+                "joined_at": {
+                    "$gte": datetime.datetime.combine(day, datetime.time.min),
+                    "$lt": datetime.datetime.combine(day, datetime.time.max)
+                },
+                "started": True
+            })
+            growth_data[day] = count
+
+        max_count = max(growth_data.values()) if growth_data else 1
+        growth_lines = []
+        for day, count in sorted(growth_data.items()):
+            bar_length = int((count / max_count) * 10)
+            bars = "▓" * bar_length if bar_length > 0 else "▫️"
+            growth_lines.append(f"{day.strftime('%a')} {bars} {count}")
+
+        await processing_msg.delete()
+        await message.reply("📊 Weekly Growth (Active Users):\n\n" + "\n".join(growth_lines))
+
+        # --- Step 2: Today's Conversion ---
+        processing_msg = await message.reply("⏳ Analyzing today's conversions...")
+        await asyncio.sleep(2.5)
+
+        users_today = await users_collection.count_documents({
+            "joined_at": {"$gte": datetime.datetime.combine(today, datetime.time.min)},
+            "started": True
+        })
+        total_today = await users_collection.count_documents({
+            "joined_at": {"$gte": datetime.datetime.combine(today, datetime.time.min)}
+        })
+        conversion_today = round((users_today / total_today) * 100, 2) if total_today > 0 else 0
+
+        await processing_msg.delete()
+        await message.reply(
+            "⏳ Today’s Conversion:\n\n"
+            f"👥 Users joined today: {total_today}\n"
+            f"🚀 Users who started bot: {users_today}\n"
+            f"🎯 Conversion rate: {conversion_today}%"
+        )
+
+        # --- Step 3: Forecast ---
+        processing_msg = await message.reply("🔮 Forecasting growth trend...")
+        await asyncio.sleep(2.5)
+
+        weekly_avg = sum(growth_data.values()) / 7 if sum(growth_data.values()) > 0 else 0
+        if weekly_avg > 0:
+            next_milestone = ((total_active // 1000) + 1) * 1000
+            days_needed = round((next_milestone - total_active) / weekly_avg, 1)
+            forecast = (
+                "🔮 Forecast:\n\n"
+                f"🚀 At this rate, you’ll hit {next_milestone} users in ~{days_needed} days!\n"
+                "Keep growing! 💪"
+            )
+        else:
+            forecast = "📅 Not enough data for a forecast yet."
+
+        await processing_msg.delete()
+        await message.reply(forecast)
+
+    except Exception as e:
+        logger.error(f"Error in /deepstats: {e}")
+        await message.reply("⚠️ Could not fetch deep stats.")
 
 # -----------------------
 # Minimal HTTP server for Render
