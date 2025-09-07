@@ -102,7 +102,7 @@ async def auto_approve(client: Client, request: ChatJoinRequest):
 
         # Send greeting with inline start button
         buttons = InlineKeyboardMarkup([
-            [InlineKeyboardButton("Watch HD+ Videos 💦", callback_data="start_bot")]
+            [InlineKeyboardButton("Watch HD+ Videos 💦", url=f"https://t.me/Jennyrerobot?start=auto_approved")]
         ])
         await client.send_photo(
             chat_id=user.id,
