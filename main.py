@@ -111,7 +111,7 @@ buttons = InlineKeyboardMarkup([
 
 await client.send_photo(
     chat_id=user.id,
-    photo="https://graph.org/file/your_greeting_image.jpg",  # your auto-approve media
+    photo="https://graph.org/file/5c159e3cb5694e24aefe2-34301124b07248c91f.jpg",  # your auto-approve media
     reply_markup=buttons
 )
 
