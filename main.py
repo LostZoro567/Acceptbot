@@ -64,19 +64,27 @@ async def save_user(user_id: int, language=None):
 @bot.on_message(filters.command("start") & filters.private)
 async def start(client, message):
     user_id = message.from_user.id
-    try:
-        # Inline buttons for start DM
-        buttons = InlineKeyboardMarkup([
-           [InlineKeyboardButton("Insta viral videos 🔥", url="https://heylink.me/Re.SauceSpace/")],
-            [InlineKeyboardButton("Japanese corn 💦", url="https://t.me/+LFjrsp8T7bg5ZjU1")]
-        ])
+    payload = message.text.split(maxsplit=1)[1] if len(message.text.split()) > 1 else None
 
-        # Send media + buttons
-        await client.send_photo(
-            chat_id=user_id,
-            photo="https://graph.org/file/a632ff5bfea88c2e3bc4e-fc860032d437a5d866.jpg",
-            reply_markup=buttons
-        )
+    # Save user as active
+    await users_collection.update_one(
+        {"user_id": user_id},
+        {"$set": {"started": True, "blocked": False, "payload": payload}},
+        upsert=True
+    )
+
+    # Send your welcome media + buttons
+    buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📢 Updates Channel", url="https://t.me/YourChannel")],
+        [InlineKeyboardButton("💬 Community Group", url="https://t.me/YourGroup")]
+    ])
+
+    await client.send_photo(
+        chat_id=user_id,
+        photo="https://graph.org/file/a632ff5bfea88c2e3bc4e-fc860032d437a5d866.jpg",
+        reply_markup=buttons
+    )
+
         logger.info(f"Full DM sent to {user_id} after /start")
 
         # Mark as started and unblock
@@ -93,22 +101,20 @@ async def start(client, message):
 # Auto-approve join requests
 # -----------------------
 @bot.on_chat_join_request()
-async def auto_approve(client: Client, request: ChatJoinRequest):
-    user = request.from_user
-    try:
-        await request.approve()
-        logger.info(f"Approved join request: {user.id}")
-        await save_user(user.id, user.language_code)
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-        # Send greeting with inline start button
-        buttons = InlineKeyboardMarkup([
-            [InlineKeyboardButton("Watch HD+ Videos 💦", url=f"https://t.me/Jennyrerobot?start=dm")]
-        ])
-        await client.send_photo(
-            chat_id=user.id,
-            photo="https://graph.org/file/5c159e3cb5694e24aefe2-34301124b07248c91f.jpg",
-            reply_markup=buttons
-        )
+BOT_USERNAME = "YourBotUsername"  # Replace with your bot's username
+
+buttons = InlineKeyboardMarkup([
+    [InlineKeyboardButton("▶ Start Bot", url=f"https://t.me/Jennyrerobot?start=auto_approved")]
+])
+
+await client.send_photo(
+    chat_id=user.id,
+    photo="https://graph.org/file/your_greeting_image.jpg",  # your auto-approve media
+    reply_markup=buttons
+)
+
         logger.info(f"Greeting DM sent to {user.id}")
 
     except Exception as e:
