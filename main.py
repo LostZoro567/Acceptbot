@@ -65,11 +65,13 @@ async def save_user(user_id: int, language=None):
 async def start(client, message):
     user_id = message.from_user.id
     try:
+        # Inline buttons for start DM
         buttons = InlineKeyboardMarkup([
-            [InlineKeyboardButton("Insta viral videos 🔥", url="https://heylink.me/Re.SauceSpace/")],
+           [InlineKeyboardButton("Insta viral videos 🔥", url="https://heylink.me/Re.SauceSpace/")],
             [InlineKeyboardButton("Japanese corn 💦", url="https://t.me/+LFjrsp8T7bg5ZjU1")]
         ])
-        
+
+        # Send media + buttons
         await client.send_photo(
             chat_id=user_id,
             photo="https://graph.org/file/a632ff5bfea88c2e3bc4e-fc860032d437a5d866.jpg",
@@ -77,7 +79,12 @@ async def start(client, message):
         )
         logger.info(f"Full DM sent to {user_id} after /start")
 
-        await users_collection.update_one({"user_id": user_id}, {"$set": {"started": True, "blocked": False}}, upsert=True)
+        # Mark as started and unblock
+        await users_collection.update_one(
+            {"user_id": user_id},
+            {"$set": {"started": True, "blocked": False}},
+            upsert=True
+        )
 
     except Exception as e:
         logger.error(f"Error sending full DM to {user_id}: {e}")
@@ -93,6 +100,7 @@ async def auto_approve(client: Client, request: ChatJoinRequest):
         logger.info(f"Approved join request: {user.id}")
         await save_user(user.id, user.language_code)
 
+        # Send greeting with inline start button
         buttons = InlineKeyboardMarkup([
             [InlineKeyboardButton("Watch HD+ Videos 💦", callback_data="start_bot")]
         ])
@@ -102,7 +110,7 @@ async def auto_approve(client: Client, request: ChatJoinRequest):
             reply_markup=buttons
         )
         logger.info(f"Greeting DM sent to {user.id}")
-        
+
     except Exception as e:
         logger.error(f"Error approving user {user.id}: {e}")
 
@@ -110,12 +118,9 @@ async def auto_approve(client: Client, request: ChatJoinRequest):
 # Callback for start button
 # -----------------------
 @bot.on_callback_query(filters.regex("start_bot"))
-async def callback_start_bot(client, callback_query):
-    try:
-        await callback_query.answer()
-        await start(client, callback_query.message)
-    except Exception as e:
-        logger.error(f"Error handling start button: {e}")
+async def start_button_callback(client, callback_query):
+    await callback_query.answer()
+    await start(client, callback_query.message)
 
 # -----------------------
 # Broadcast command (admins only)
@@ -139,7 +144,10 @@ async def broadcast(client, message):
             await asyncio.sleep(e.x)
         except Exception:
             failed += 1
-            await users_collection.update_one({"user_id": user["user_id"]}, {"$set": {"blocked": True}})
+            await users_collection.update_one(
+                {"user_id": user["user_id"]},
+                {"$set": {"blocked": True}}
+            )
 
     await stats_collection.update_one(
         {"_id": "broadcasts"},
@@ -203,10 +211,8 @@ async def deepstats(client, message):
         for i in range(7):
             day = today - datetime.timedelta(days=i)
             count = await users_collection.count_documents({
-                "joined_at": {
-                    "$gte": datetime.datetime.combine(day, datetime.time.min),
-                    "$lt": datetime.datetime.combine(day, datetime.time.max),
-                },
+                "joined_at": {"$gte": datetime.datetime.combine(day, datetime.time.min),
+                              "$lt": datetime.datetime.combine(day, datetime.time.max)},
                 "started": True
             })
             growth_data[day] = count
@@ -229,7 +235,9 @@ async def deepstats(client, message):
             "joined_at": {"$gte": datetime.datetime.combine(today, datetime.time.min)},
             "started": True
         })
-        total_today = await users_collection.count_documents({"joined_at": {"$gte": datetime.datetime.combine(today, datetime.time.min)}})
+        total_today = await users_collection.count_documents({
+            "joined_at": {"$gte": datetime.datetime.combine(today, datetime.time.min)}
+        })
         conversion_today = round((users_today / total_today) * 100, 2) if total_today > 0 else 0
 
         await processing_msg.delete()
@@ -264,33 +272,22 @@ async def deepstats(client, message):
         await message.reply("⚠️ Could not fetch deep stats.")
 
 # -----------------------
-# Refresh active users (admins only)
+# Refresh command (admins only)
 # -----------------------
 @bot.on_message(filters.command("refresh") & filters.user(ADMINS))
 async def refresh(client, message):
-    try:
-        msg = await message.reply("🔄 Refreshing active users...")
-        sent = 0
-        blocked = 0
-
-        async for user in users_collection.find({}):
-            user_id = user["user_id"]
-            try:
-                await client.send_message(user_id, "👋 Checking if you are active...")
-                await users_collection.update_one(
-                    {"user_id": user_id}, {"$set": {"started": True, "blocked": False}}, upsert=True
-                )
-                sent += 1
-                await asyncio.sleep(0.5)
-            except Exception:
-                blocked += 1
-                await users_collection.update_one({"user_id": user_id}, {"$set": {"started": False, "blocked": True}})
-
-        await msg.edit(f"✅ Refresh complete!\nActive users: {sent}\nBlocked users: {blocked}")
-
-    except Exception as e:
-        logger.error(f"Error in /refresh: {e}")
-        await message.reply("⚠️ Refresh failed.")
+    sent = 0
+    failed = 0
+    async for user in users_collection.find():
+        try:
+            # Try DM to see if user is active
+            await client.send_message(user["user_id"], "🌀 Refreshing your status...")
+            await users_collection.update_one({"user_id": user["user_id"]}, {"$set": {"started": True}})
+            sent += 1
+        except Exception:
+            await users_collection.update_one({"user_id": user["user_id"]}, {"$set": {"blocked": True}})
+            failed += 1
+    await message.reply(f"🔄 Refresh complete!\n✅ Active: {sent}\n❌ Blocked: {failed}")
 
 # -----------------------
 # Minimal HTTP server for Render
